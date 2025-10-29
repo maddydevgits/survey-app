@@ -1,0 +1,1308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- SurveyJS CSS -->
+    <link href="https://unpkg.com/survey-core@1.11.12/defaultV2.min.css" type="text/css" rel="stylesheet">
+    
+    <!-- Survey Creator CSS -->
+    <link href="https://unpkg.com/survey-creator-core@1.11.12/survey-creator-core.min.css" type="text/css" rel="stylesheet">
+    
+    <style>
+        .code-block {
+            display: none;
+        }
+        
+        .code-block.active {
+            display: block;
+        }
+        
+        #jsonPreview {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        #htmlPreview {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .notification {
+            opacity: 0;
+            transform: translateX(100%);
+            transition: all 0.3s ease;
+        }
+        
+        .notification.show {
+            opacity: 1;
+            transform: translateX(0);
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-purple-600 to-purple-800 min-h-screen p-2 sm:p-4 md:p-5">
+    <div class="max-w-7xl mx-auto bg-white rounded-xl shadow-2xl overflow-hidden">
+        <div class="bg-gradient-to-r from-purple-600 to-purple-700 text-white p-4 sm:p-6 md:p-8 text-center">
+            <h1 class="text-2xl sm:text-3xl md:text-4xl font-bold mb-2">🏗️ {{ pageTitle }}</h1>
+            <p class="text-sm sm:text-base md:text-lg opacity-90">Build beautiful surveys and forms with ease</p>
+        </div>
+        
+        <div class="bg-gray-50 px-2 sm:px-4 md:px-8 py-3 sm:py-4 md:py-5 border-b border-gray-200 flex flex-wrap gap-2">
+            <button class="bg-purple-600 hover:bg-purple-700 text-white px-3 sm:px-4 md:px-5 py-2 sm:py-2.5 rounded-lg text-sm sm:text-base font-medium transition-transform hover:-translate-y-0.5 hover:shadow-lg flex items-center gap-1 sm:gap-2 w-full sm:w-auto" id="showPreview">
+                <span class="hidden sm:inline">📱</span> <span class="sm:hidden">📱</span> <span class="truncate">Show Live Preview</span>
+            </button>
+            <button class="bg-blue-500 hover:bg-blue-600 text-white px-3 sm:px-4 md:px-5 py-2 sm:py-2.5 rounded-lg text-sm sm:text-base font-medium transition-transform hover:-translate-y-0.5 hover:shadow-lg flex items-center gap-1 sm:gap-2 w-full sm:w-auto" id="saveSurvey">
+                <span>💾</span> <span class="truncate">Save Survey</span>
+            </button>
+            <button class="bg-green-500 hover:bg-green-600 text-white px-3 sm:px-4 md:px-5 py-2 sm:py-2.5 rounded-lg text-sm sm:text-base font-medium transition-transform hover:-translate-y-0.5 hover:shadow-lg flex items-center gap-1 sm:gap-2 w-full sm:w-auto" id="exportJson">
+                <span>📥</span> <span class="truncate">Export as JSON</span>
+            </button>
+            <button class="bg-orange-500 hover:bg-orange-600 text-white px-3 sm:px-4 md:px-5 py-2 sm:py-2.5 rounded-lg text-sm sm:text-base font-medium transition-transform hover:-translate-y-0.5 hover:shadow-lg flex items-center gap-1 sm:gap-2 w-full sm:w-auto" id="importJson">
+                <span>📤</span> <span class="truncate">Import JSON</span>
+            </button>
+            <input type="file" accept=".json" id="importJsonFile" class="hidden">
+            <a href="/surveys" class="bg-indigo-500 hover:bg-indigo-600 text-white px-3 sm:px-4 md:px-5 py-2 sm:py-2.5 rounded-lg text-sm sm:text-base font-medium transition-transform hover:-translate-y-0.5 hover:shadow-lg flex items-center gap-1 sm:gap-2 w-full sm:w-auto justify-center" id="viewSurveys">
+                <span>📋</span> <span class="truncate">My Surveys</span>
+            </a>
+            <button class="bg-gray-600 hover:bg-gray-700 text-white px-3 sm:px-4 md:px-5 py-2 sm:py-2.5 rounded-lg text-sm sm:text-base font-medium transition-transform hover:-translate-y-0.5 hover:shadow-lg flex items-center gap-1 sm:gap-2 w-full sm:w-auto" id="clearBuilder">
+                <span>🗑️</span> <span class="truncate">Clear Form</span>
+            </button>
+        </div>
+        
+        <div class="grid grid-cols-1 lg:grid-cols-2 min-h-[400px] sm:min-h-[500px] lg:min-h-[600px]">
+            <div id="surveyCreator" class="border-b lg:border-b-0 lg:border-r border-gray-200 p-3 sm:p-4 md:p-5 overflow-x-auto"></div>
+            <div class="p-3 sm:p-4 md:p-5 overflow-y-auto max-h-[400px] sm:max-h-[500px] lg:max-h-[800px]">
+                <h3 class="text-lg sm:text-xl font-semibold mb-3 sm:mb-5 text-gray-800">Live Preview</h3>
+                <div id="surveyContainer" class="bg-white"></div>
+            </div>
+        </div>
+        
+        <div class="bg-gray-50 px-3 sm:px-4 md:px-8 py-4 sm:py-5 border-t border-gray-200 hidden" id="exportSection">
+            <h3 class="text-base sm:text-lg font-semibold mb-3 sm:mb-4 text-gray-800">Exported JSON</h3>
+            <div class="mb-2">
+                <p class="text-xs sm:text-sm text-gray-600 font-medium" id="exportedSurveyTitle"></p>
+            </div>
+            <div class="flex flex-col sm:flex-row flex-wrap gap-2">
+                <button class="bg-green-500 hover:bg-green-600 text-white px-4 sm:px-5 py-2 sm:py-2.5 rounded-lg text-sm sm:text-base font-medium transition-transform hover:-translate-y-0.5 hover:shadow-lg w-full sm:w-auto" id="copyJson">📋 Copy JSON</button>
+                <button class="bg-blue-500 hover:bg-blue-600 text-white px-4 sm:px-5 py-2 sm:py-2.5 rounded-lg text-sm sm:text-base font-medium transition-transform hover:-translate-y-0.5 hover:shadow-lg w-full sm:w-auto" id="downloadJson">💾 Download JSON</button>
+            </div>
+            
+            <div class="bg-gray-900 text-green-400 p-3 sm:p-4 rounded-lg mt-3 overflow-x-auto font-mono text-xs sm:text-sm max-h-64 sm:max-h-96 overflow-y-auto" id="jsonPreview"></div>
+        </div>
+    </div>
+    
+    <div class="fixed top-3 sm:top-5 right-3 sm:right-5 bg-green-500 text-white px-4 sm:px-6 py-3 sm:py-4 rounded-lg shadow-lg z-50 hidden text-sm sm:text-base max-w-[calc(100%-2rem)] sm:max-w-none" id="notification">Copied to clipboard!</div>
+    
+    <!-- Export Modal -->
+    <div id="exportModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center p-2 sm:p-4">
+        <div class="bg-white rounded-lg shadow-2xl p-4 sm:p-6 max-w-2xl w-full max-h-[90vh] sm:max-h-[80vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-3 sm:mb-4">
+                <h3 class="text-xl sm:text-2xl font-bold text-gray-800">📥 Export Survey</h3>
+                <button id="closeExportModal" class="text-gray-500 hover:text-gray-700 text-2xl sm:text-3xl leading-none">&times;</button>
+            </div>
+            <div class="mb-4">
+                <p class="text-sm sm:text-base text-gray-600 mb-3 sm:mb-4">Select a survey to export:</p>
+                <div id="surveysList" class="space-y-2 max-h-48 sm:max-h-64 overflow-y-auto border rounded-lg p-2 sm:p-3">
+                    <div class="text-center text-gray-500 py-4 text-sm">Loading surveys...</div>
+                </div>
+            </div>
+            <div class="flex flex-col sm:flex-row gap-2">
+                <button id="exportCurrentForm" class="bg-purple-500 hover:bg-purple-600 text-white px-4 sm:px-5 py-2 sm:py-2.5 rounded-lg text-sm sm:text-base font-medium w-full sm:w-auto">
+                    📝 Export Current Form
+                </button>
+                <button id="closeExportModalBtn" class="bg-gray-500 hover:bg-gray-600 text-white px-4 sm:px-5 py-2 sm:py-2.5 rounded-lg text-sm sm:text-base font-medium w-full sm:w-auto">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- SurveyJS Framework-Agnostic Bundles (No Knockout.js Required) -->
+    <script src="https://unpkg.com/survey-core@1.11.12/survey.core.min.js"></script>
+    <script src="https://unpkg.com/survey-js-ui@1.11.12/survey-js-ui.min.js"></script>
+    <script src="https://unpkg.com/survey-creator-core@1.11.12/survey-creator-core.min.js"></script>
+    <script src="https://unpkg.com/survey-creator-js@1.11.12/survey-creator-js.min.js"></script>
+    
+    <script>
+        // Wait for all scripts to load (no Knockout needed with modern bundles)
+        function waitForScripts() {
+            return new Promise((resolve) => {
+                let attempts = 0;
+                const maxAttempts = 100; // Increase attempts for slower CDN loads
+                
+                const checkScripts = setInterval(() => {
+                    attempts++;
+                    
+                    // Check for Survey and SurveyCreator (no Knockout required)
+                    const surveyReady = typeof Survey !== 'undefined';
+                    const creatorReady = typeof SurveyCreator !== 'undefined' && 
+                                         typeof SurveyCreator.SurveyCreator !== 'undefined';
+                    
+                    if ((surveyReady && creatorReady) || attempts >= maxAttempts) {
+                        clearInterval(checkScripts);
+                        console.log('Scripts loaded check:', {
+                            Survey: surveyReady,
+                            SurveyCreator: creatorReady,
+                            attempts: attempts
+                        });
+                        resolve();
+                    }
+                }, 150); // Check every 150ms
+            });
+        }
+    </script>
+    
+    <script>
+        let creator, currentSurveyJSON = null, surveyInstance = null;
+        
+        // Initialize when page loads
+        async function initApp() {
+            // Wait for all scripts to be available
+            await waitForScripts();
+            
+            // No need to check for Knockout.js with modern bundles
+            if (typeof Survey === 'undefined') {
+                document.getElementById('surveyCreator').innerHTML = 
+                    '<div style="padding: 20px; color: red;">Error: Survey Core failed to load. Please refresh the page.</div>';
+                return;
+            }
+            
+            if (typeof SurveyCreator === 'undefined') {
+                document.getElementById('surveyCreator').innerHTML = 
+                    '<div style="padding: 20px; color: red;">Error: Survey Creator failed to load. Please refresh the page.</div>';
+                return;
+            }
+        
+            // Initialize the Survey Creator
+            try {
+                // Ensure the DOM element exists and is ready
+                const creatorElement = document.getElementById('surveyCreator');
+                if (!creatorElement) {
+                    throw new Error('Survey creator container element not found');
+                }
+                
+                // Wait longer to ensure everything is fully initialized
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // Double check everything is still available
+                // Log what's available for debugging
+                console.log('Available objects:', {
+                    Survey: typeof Survey !== 'undefined',
+                    'Survey.Survey': typeof Survey !== 'undefined' && typeof Survey.Survey !== 'undefined',
+                    'Survey.Model': typeof Survey !== 'undefined' && typeof Survey.Model !== 'undefined',
+                    SurveyCreator: typeof SurveyCreator !== 'undefined',
+                    'SurveyCreator.SurveyCreator': typeof SurveyCreator !== 'undefined' && typeof SurveyCreator.SurveyCreator !== 'undefined'
+                });
+                
+                if (typeof Survey === 'undefined') {
+                    throw new Error('Survey is not available. Scripts may not have loaded.');
+                }
+                if (typeof SurveyCreator === 'undefined') {
+                    throw new Error('SurveyCreator is not available. Scripts may not have loaded.');
+                }
+                if (typeof SurveyCreator.SurveyCreator === 'undefined') {
+                    throw new Error('SurveyCreator.SurveyCreator class is not available. Please check CDN link.');
+                }
+                
+                // Verify the element is in the DOM and ready
+                const checkElement = document.getElementById('surveyCreator');
+                if (!checkElement || !checkElement.parentNode || !document.body.contains(checkElement)) {
+                    throw new Error('Survey creator container element is not properly attached to DOM');
+                }
+                
+                // Use SurveyCreator directly since we already checked it exists
+                const SurveyCreatorNamespace = SurveyCreator;
+                
+                const creatorOptions = {
+                    showLogicTab: true,
+                    showTranslationTab: true,
+                    isAutoSave: true,
+                    showDesignerTab: true,
+                    showEmbededSurveyTab: false
+                };
+                
+                // Wait longer to ensure everything is stable
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // Verify element is still in DOM and ready
+                const finalCheck = document.getElementById('surveyCreator');
+                if (!finalCheck || !document.body.contains(finalCheck)) {
+                    throw new Error('Element not ready for SurveyCreator');
+                }
+                
+                // DON'T clear the element - some versions of SurveyCreator need it as-is
+                // We'll clear it right before rendering if needed
+                
+                // Wait one more frame to ensure DOM is stable
+                await new Promise(resolve => requestAnimationFrame(resolve));
+                
+                // Restore full creator options
+                const fullCreatorOptions = {
+                        showLogicTab: true,
+                        showTranslationTab: true,
+                        isAutoSave: true,
+                        showDesignerTab: true,
+                        showEmbededSurveyTab: false
+                    };
+                    
+                // Create the creator (modern versions don't need element in constructor)
+                creator = new SurveyCreatorNamespace.SurveyCreator(fullCreatorOptions);
+                
+                // Helper functions (define them before render so they're available)
+                function updatePreview() {
+                    console.log('updatePreview called');
+                    
+                    // Ensure creator is available
+                    if (!creator) {
+                        console.error('Creator is not available');
+                        document.getElementById('surveyContainer').innerHTML = 
+                            '<p class="text-red-500 text-center p-10">Error: Form builder not ready. Please wait a moment.</p>';
+                        return;
+                    }
+                    
+                    // Always create a NEW survey instance for preview
+                    // We cannot reuse creator.survey because it's already bound to the creator's DOM
+                    let survey = null;
+                    console.log('Creating new survey instance for preview (cannot reuse creator.survey)');
+                    
+                    // Get the latest JSON from creator
+                    let json = null;
+                    try {
+                        json = creator.JSON;
+                        console.log('Got JSON from creator.JSON:', json);
+                        
+                        // If creator.JSON is empty or null, try creator.text
+                        if (!json || (!json.pages && !json.elements && !json.questions)) {
+                            if (creator.text) {
+                                try {
+                                    json = JSON.parse(creator.text);
+                                    console.log('Got JSON from creator.text:', json);
+                                } catch (e) {
+                                    console.warn('Could not parse creator.text:', e);
+                                }
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error getting JSON from creator:', error);
+                    }
+                    
+                    if (!json || (!json.pages && !json.elements && !json.questions)) {
+                        console.warn('No valid JSON available from creator');
+                        document.getElementById('surveyContainer').innerHTML = 
+                            '<p class="text-gray-500 text-center p-10">No form elements yet. Start building your form!</p>';
+                        return;
+                    }
+                    
+                    // Check for elements in different places (like in save function)
+                    const hasElements = (
+                        (json.elements && Array.isArray(json.elements) && json.elements.length > 0) ||
+                        (json.pages && Array.isArray(json.pages) && json.pages.length > 0 && json.pages[0].elements && Array.isArray(json.pages[0].elements) && json.pages[0].elements.length > 0) ||
+                        (json.questions && Array.isArray(json.questions) && json.questions.length > 0)
+                    );
+                    
+                    console.log('updatePreview - Checking JSON:', {
+                        hasJson: !!json,
+                        hasElements: hasElements,
+                        elementsCount: json.elements ? json.elements.length : 0,
+                        pagesCount: json.pages ? json.pages.length : 0,
+                        pagesElementsCount: (json.pages && json.pages[0] && json.pages[0].elements) ? json.pages[0].elements.length : 0,
+                        jsonKeys: Object.keys(json),
+                        jsonString: JSON.stringify(json).substring(0, 200)
+                    });
+                    
+                    if (!hasElements) {
+                        document.getElementById('surveyContainer').innerHTML = 
+                            '<p class="text-gray-500 text-center p-10">No form elements yet. Start building your form!</p>';
+                        return;
+                    }
+                    
+                    // Try different Survey class paths for compatibility
+                    let SurveyClass;
+                    if (typeof Survey !== 'undefined') {
+                        if (typeof Survey.Survey !== 'undefined') {
+                            SurveyClass = Survey.Survey;
+                        } else if (typeof Survey.Model !== 'undefined') {
+                            SurveyClass = Survey.Model;
+                } else {
+                            console.error('Survey class not found. Available Survey keys:', Object.keys(Survey || {}));
+                            document.getElementById('surveyContainer').innerHTML = 
+                                '<p class="text-red-500 text-center p-10">Error: Survey library not loaded properly. Please refresh the page.</p>';
+                            return;
+                        }
+                    } else {
+                        console.error('Survey is not defined');
+                        document.getElementById('surveyContainer').innerHTML = 
+                            '<p class="text-red-500 text-center p-10">Error: Survey library not loaded. Please refresh the page.</p>';
+                            return;
+                        }
+                        
+                    try {
+                        // Create a completely fresh survey instance
+                        survey = new SurveyClass(json);
+                        
+                        // Ensure it's not already bound to any DOM element
+                        if (survey.rootElement) {
+                            console.log('New survey instance has rootElement - clearing it');
+                            // Try to disconnect from any existing DOM
+                            try {
+                                if (typeof survey.clear === 'function') {
+                                    survey.clear();
+                                }
+                            } catch (e) {
+                                console.warn('Could not clear survey:', e);
+                            }
+                            // Remove rootElement reference
+                            survey.rootElement = null;
+                        }
+                    } catch (createError) {
+                        console.error('Error creating survey from JSON:', createError);
+                        document.getElementById('surveyContainer').innerHTML = 
+                            '<p class="text-red-500 text-center p-10">Error creating survey: ' + createError.message + '</p>';
+                        return;
+                    }
+                    
+                    // Now render the survey
+                    if (!survey) {
+                        console.error('Survey instance is not available');
+                        document.getElementById('surveyContainer').innerHTML = 
+                            '<p class="text-red-500 text-center p-10">Error: Could not create survey instance.</p>';
+                        return;
+                    }
+                    
+                    try {
+                        const containerElement = document.getElementById('surveyContainer');
+                        
+                        if (!containerElement) {
+                            console.error('surveyContainer element not found');
+                            return;
+                        }
+                        
+                        console.log('Survey object created:', {
+                            surveyType: typeof survey,
+                            hasRender: typeof survey.render === 'function',
+                            hasRootElement: !!survey.rootElement,
+                            rootElementTag: survey.rootElement ? survey.rootElement.tagName : 'none',
+                            hasPages: survey.pages ? survey.pages.length : 0
+                        });
+                        
+                        console.log('Container element before render:', containerElement);
+                        console.log('Container element dimensions:', {
+                            width: containerElement.offsetWidth,
+                            height: containerElement.offsetHeight,
+                            display: window.getComputedStyle(containerElement).display,
+                            visibility: window.getComputedStyle(containerElement).visibility
+                        });
+                        
+                        // Clear container first
+                        containerElement.innerHTML = '';
+                        
+                        // Force container to be visible
+                        containerElement.style.display = 'block';
+                        containerElement.style.visibility = 'visible';
+                        containerElement.style.minHeight = '100px';
+                        
+                        // Wait for DOM to be ready
+                        setTimeout(() => {
+                            // Re-get the element to ensure it's still available
+                            const renderContainer = document.getElementById('surveyContainer');
+                            if (!renderContainer) {
+                                console.error('Container element disappeared');
+                                return;
+                            }
+                            
+                            try {
+                                // Verify render method exists
+                                if (typeof survey.render !== 'function') {
+                                    console.error('survey.render is not a function', survey);
+                                    renderContainer.innerHTML = 
+                                        '<p class="text-red-500 text-center p-10">Error: Survey render method not available.</p>';
+                                    return;
+                                }
+                                
+                                // Clear container completely before render
+                                renderContainer.innerHTML = '';
+                                
+                                // Clear any previous render state from survey
+                                if (survey.rootElement) {
+                                    console.log('Survey has existing rootElement, will create new one');
+                                }
+                                
+                                console.log('Rendering survey with container ID string');
+                                console.log('RenderContainer ID:', renderContainer.id);
+                                
+                                // Try rendering - first attempt with clean state
+                                // Make sure container is ready
+                                renderContainer.style.minHeight = '200px';
+                                renderContainer.style.overflow = 'visible';
+                                
+                                console.log('About to render survey:', {
+                                    containerId: renderContainer.id,
+                                    containerClasses: renderContainer.className,
+                                    containerStyle: renderContainer.style.cssText,
+                                    surveyHasPages: survey.pages && survey.pages.length > 0
+                                });
+                                
+                                // Try with ID string (like survey-runner)
+                                let renderSuccess = false;
+                                try {
+                                    console.log('Attempting render with ID string:', renderContainer.id);
+                                    survey.render(renderContainer.id);
+                                    renderSuccess = true;
+                                    console.log('Survey render call completed with ID string');
+                                } catch (idError) {
+                                    console.warn('Render with ID string failed:', idError);
+                                    // Fallback: render with element object
+                                    try {
+                                        console.log('Trying render with element object');
+                                        survey.render(renderContainer);
+                                        renderSuccess = true;
+                                        console.log('Survey render call completed with element object');
+                                    } catch (elementError) {
+                                        console.error('Both render methods failed:', elementError);
+                                        throw elementError;
+                                    }
+                                }
+                                
+                                if (renderSuccess) {
+                                    // Check immediately
+                                    const immediateCheck = document.getElementById(renderContainer.id);
+                                    console.log('Immediate check after render:', {
+                                        hasChildren: immediateCheck ? immediateCheck.children.length : 0,
+                                        innerHTMLLength: immediateCheck ? immediateCheck.innerHTML.length : 0,
+                                        firstChild: immediateCheck && immediateCheck.firstChild ? immediateCheck.firstChild.tagName : 'none',
+                                        surveyRootElement: survey.rootElement ? survey.rootElement.tagName : 'none'
+                                    });
+                                    
+                                    // Check again after a short delay (render might be async)
+                                    setTimeout(() => {
+                                        const delayedCheck = document.getElementById(renderContainer.id);
+                                        const hasContent = delayedCheck && delayedCheck.innerHTML.trim().length > 0;
+                                        const childrenCount = delayedCheck ? delayedCheck.children.length : 0;
+                                        
+                                        console.log('Delayed check after render:', {
+                                            hasContent: hasContent,
+                                            childrenCount: childrenCount,
+                                            innerHTMLPreview: delayedCheck ? delayedCheck.innerHTML.substring(0, 200) : 'N/A',
+                                            surveyRootElement: survey.rootElement,
+                                            rootElementParent: survey.rootElement && survey.rootElement.parentElement ? survey.rootElement.parentElement.id : 'none'
+                                        });
+                                        
+                                        if (hasContent || childrenCount > 0) {
+                                            console.log('✅ Preview rendered successfully!');
+                                            showNotification('Preview updated!');
+                    } else {
+                                            // Check if survey.rootElement was created but not attached to our container
+                                            if (survey.rootElement && survey.rootElement.parentElement !== renderContainer) {
+                                                console.warn('Survey rootElement exists but is not in our container!', {
+                                                    rootElementParent: survey.rootElement.parentElement,
+                                                    ourContainer: renderContainer
+                                                });
+                                                // Try to manually move it
+                                                try {
+                                                    renderContainer.appendChild(survey.rootElement);
+                                                    console.log('Manually moved rootElement to container');
+                                                    showNotification('Preview updated!');
+                                                } catch (moveError) {
+                                                    console.error('Could not move rootElement:', moveError);
+                                                }
+                                            }
+                                        }
+                                    }, 100);
+                                }
+                                
+                                // Force a DOM update
+                                if (renderContainer) {
+                                    renderContainer.offsetHeight; // Force reflow
+                                }
+                                
+                                // Check immediately and after delay
+                                const checkRender = () => {
+                                    const afterRender = document.getElementById('surveyContainer');
+                                    const hasContent = afterRender && afterRender.innerHTML.trim().length > 0;
+                                    const childrenCount = afterRender ? afterRender.children.length : 0;
+                                    
+                                    console.log('Container check:', {
+                                        elementExists: !!afterRender,
+                                        innerHTMLLength: afterRender ? afterRender.innerHTML.length : 0,
+                                        innerHTMLPreview: afterRender ? afterRender.innerHTML.substring(0, 500) : 'N/A',
+                                        childrenCount: childrenCount,
+                                        firstChild: afterRender && afterRender.firstChild ? afterRender.firstChild.tagName : 'none',
+                                        hasContent: hasContent,
+                                        computedDisplay: afterRender ? window.getComputedStyle(afterRender).display : 'N/A'
+                                    });
+                                    
+                                    // Check for SurveyJS classes anywhere in the DOM tree
+                                    const surveyElements = afterRender ? afterRender.querySelectorAll('.sv-root, .sv_main, [class*="sv-"], [class*="sv_root"]') : [];
+                                    console.log('Found SurveyJS elements:', surveyElements.length);
+                                    if (surveyElements.length > 0) {
+                                        console.log('SurveyJS root found:', surveyElements[0]);
+                                    }
+                                    
+                                    // Check if survey object has a currentPage or state that indicates it's rendered
+                                    if (survey.currentPage !== undefined) {
+                                        console.log('Survey currentPage:', survey.currentPage);
+                                    }
+                                    
+                                    if (hasContent && childrenCount > 0) {
+                                        console.log('✅ Preview rendered successfully with content!');
+                                        showNotification('Preview updated!');
+                                        return true;
+                                    } else if (surveyElements.length > 0) {
+                                        console.log('✅ Found SurveyJS elements in container');
+                            showNotification('Preview updated!');
+                                        return true;
+                } else {
+                                        return false;
+                                    }
+                                };
+                                
+                                // Check immediately
+                                const rendered = checkRender();
+                                
+                                // Check again after a longer delay
+                                if (!rendered) {
+                                    setTimeout(() => {
+                                        const rendered2 = checkRender();
+                                        if (!rendered2) {
+                                            console.warn('⚠️ Container still empty after render. Survey may need different initialization.');
+                                            console.log('Survey object:', survey);
+                                            console.log('Trying alternative: checking if survey has rendered property');
+                                            
+                                            // Try to manually check what the survey is doing
+                                            if (survey.surveyId !== undefined) {
+                                                console.log('Survey has surveyId:', survey.surveyId);
+                                            }
+                                            
+                                            // Show error to user
+                                            showNotification('Preview may not have rendered correctly. Check console.', 'error');
+                                        }
+                                    }, 300);
+                                }
+                                
+                            } catch (renderError) {
+                                console.error('Render error in preview:', renderError);
+                                console.error('Render error stack:', renderError.stack);
+                                console.error('Error details:', {
+                                    message: renderError.message,
+                                    name: renderError.name,
+                                    survey: survey
+                                });
+                                document.getElementById('surveyContainer').innerHTML = 
+                                    '<p class="text-red-500 text-center p-10">Error rendering preview: ' + renderError.message + 
+                                    '<br><small>Check console for details</small></p>';
+                            }
+                        }, 100); // Delay for DOM stability
+                        
+            } catch (error) {
+                        console.error('Error creating survey for preview:', error);
+                            document.getElementById('surveyContainer').innerHTML = 
+                            '<p class="text-red-500 text-center p-10">Error creating preview: ' + error.message + '</p>';
+                        }
+                    }
+                    
+                    function showExportSection() {
+                        document.getElementById('exportSection').classList.remove('hidden');
+                    }
+                    
+                    function copyToClipboard(text) {
+                        navigator.clipboard.writeText(text).catch(err => {
+                            console.error('Failed to copy: ', err);
+                            const textArea = document.createElement('textarea');
+                            textArea.value = text;
+                            textArea.style.position = 'fixed';
+                            textArea.style.opacity = '0';
+                            document.body.appendChild(textArea);
+                            textArea.select();
+                            document.execCommand('copy');
+                            document.body.removeChild(textArea);
+                        });
+                    }
+                    
+                    function showNotification(message, type = 'success') {
+                        const notification = document.getElementById('notification');
+                        notification.textContent = message;
+                        
+                        if (type === 'error') {
+                            notification.className = 'fixed top-5 right-5 bg-red-500 text-white px-6 py-4 rounded-lg shadow-lg z-50';
+                        } else {
+                            notification.className = 'fixed top-5 right-5 bg-green-500 text-white px-6 py-4 rounded-lg shadow-lg z-50';
+                        }
+                        
+                        notification.classList.add('show');
+                        
+                        setTimeout(() => {
+                            notification.classList.remove('show');
+                        }, 3000);
+                    }
+                
+                // Wait a bit then render the creator manually
+                setTimeout(async () => {
+                    try {
+                        // Ensure creator was created successfully
+                        if (!creator) {
+                            throw new Error('Creator was not created');
+                        }
+                        
+                        // Get the DOM element (not just ID)
+                        const renderElement = document.getElementById('surveyCreator');
+                        if (!renderElement) {
+                            throw new Error('Survey creator container element not found');
+                        }
+                        
+                        // Ensure element is completely empty (no Knockout cleanup needed)
+                        renderElement.innerHTML = '';
+                        
+                        // Force a reflow to ensure DOM is updated
+                        renderElement.offsetHeight;
+                        
+                        // Wait for DOM to settle completely
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                        
+                        // Use requestAnimationFrame to ensure DOM is ready
+                        requestAnimationFrame(() => {
+                            try {
+                                // Render with element ID (modern bundles handle this cleanly)
+                    creator.render('surveyCreator');
+                
+                                // Set up event listeners after successful render
+                                setupEventListeners();
+                            } catch (renderError) {
+                                console.error('Render failed:', renderError);
+                                renderElement.innerHTML = 
+                                    '<div style="padding: 20px; color: red;">Render error: ' + renderError.message + '</div>';
+                            }
+                        });
+                        
+                        // Event listener setup function
+                        function setupEventListeners() {
+                            // Set up event listeners after successful render
+                            // Remove any existing event listeners first to prevent duplicates
+                            const showPreviewBtn = document.getElementById('showPreview');
+                            const newShowPreviewBtn = showPreviewBtn.cloneNode(true);
+                            showPreviewBtn.parentNode.replaceChild(newShowPreviewBtn, showPreviewBtn);
+                            
+                            // Show live preview - use the cloned button
+                            newShowPreviewBtn.addEventListener('click', function(e) {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                console.log('Show Live Preview button clicked');
+                                console.log('Creator available:', !!creator);
+                                console.log('Creator.JSON:', creator ? creator.JSON : 'N/A');
+                                
+                                // Ensure creator is available
+                                if (!creator) {
+                                    showNotification('Form builder not ready. Please wait a moment and try again.', 'error');
+                                    return;
+                                }
+                                
+                                // Call updatePreview directly
+                                try {
+                        updatePreview();
+                                } catch (error) {
+                                    console.error('Error in updatePreview:', error);
+                                    showNotification('Error updating preview: ' + error.message, 'error');
+                                }
+                    });
+                    
+                    // Update preview when creator changes
+                    creator.onSurveyInstanceCreated.add((sender, options) => {
+                        if (options.survey) {
+                            surveyInstance = options.survey;
+                        }
+                    });
+                    
+                    // Save survey
+                    document.getElementById('saveSurvey').addEventListener('click', async function() {
+                        const json = creator.JSON;
+                            
+                            // More flexible check for survey elements
+                            // SurveyJS can have elements in different places:
+                            // - json.elements (direct)
+                            // - json.pages[0].elements (in pages)
+                            // - json.questions (alternative structure)
+                            const hasElements = json && (
+                                (json.elements && json.elements.length > 0) ||
+                                (json.pages && json.pages.length > 0 && json.pages[0].elements && json.pages[0].elements.length > 0) ||
+                                (json.questions && json.questions.length > 0)
+                            );
+                            
+                            if (!json) {
+                                console.error('Creator JSON is null or undefined');
+                                showNotification('Error: Could not retrieve survey data. Please refresh the page.', 'error');
+                            return;
+                        }
+                            
+                            // Log the structure for debugging
+                            console.log('Survey JSON structure:', JSON.stringify(json, null, 2));
+                            
+                            if (!hasElements) {
+                                console.log('Has elements check:', {
+                                    hasJson: !!json,
+                                    hasElements: !!(json && json.elements),
+                                    elementsLength: json && json.elements ? json.elements.length : 0,
+                                    hasPages: !!(json && json.pages),
+                                    pagesLength: json && json.pages ? json.pages.length : 0,
+                                    hasPagesElements: !!(json && json.pages && json.pages[0] && json.pages[0].elements),
+                                    pagesElementsLength: (json && json.pages && json.pages[0] && json.pages[0].elements) ? json.pages[0].elements.length : 0
+                                });
+                                
+                                // Allow saving even without elements (user might want to save a draft)
+                                // Just show a warning
+                                const proceed = confirm('No questions detected in the form. Do you want to save an empty survey anyway?');
+                                if (!proceed) {
+                                    return;
+                                }
+                            }
+                        
+                        const title = prompt('Enter survey title:', json.title || 'Untitled Survey');
+                        if (title === null) return;
+                        
+                        try {
+                            const response = await fetch('/api/survey/save', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify({
+                                    json: json,
+                                    title: title
+                                })
+                            });
+                            
+                            const result = await response.json();
+                            if (result.success) {
+                                showNotification('Survey saved successfully!', 'success');
+                                setTimeout(() => {
+                                    if (confirm('Survey saved! Would you like to view all surveys?')) {
+                                        window.location.href = '/surveys';
+                                    }
+                                }, 1500);
+                            } else {
+                                showNotification('Failed to save survey', 'error');
+                            }
+                        } catch (error) {
+                            console.error('Error saving survey:', error);
+                            showNotification('Error saving survey: ' + error.message, 'error');
+                        }
+                    });
+                    
+                        // Export as JSON - show modal with surveys list
+                        document.getElementById('exportJson').addEventListener('click', async function() {
+                            const modal = document.getElementById('exportModal');
+                            modal.classList.remove('hidden');
+                            modal.classList.add('flex');
+                            
+                            // Load surveys list
+                            try {
+                                const response = await fetch('/api/surveys/list');
+                                
+                                if (!response.ok) {
+                                    throw new Error(`HTTP error! status: ${response.status}`);
+                                }
+                                
+                                const result = await response.json();
+                                
+                                const surveysList = document.getElementById('surveysList');
+                                
+                                if (result.success && result.surveys && result.surveys.length > 0) {
+                                    surveysList.innerHTML = '';
+                                    result.surveys.forEach(survey => {
+                                        const surveyItem = document.createElement('div');
+                                        surveyItem.className = 'border border-gray-200 rounded-lg p-3 hover:bg-gray-50 cursor-pointer transition';
+                                        surveyItem.innerHTML = `
+                                            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-0">
+                                                <div class="flex-1 min-w-0">
+                                                    <div class="font-semibold text-sm sm:text-base text-gray-800 break-words">${survey.title}</div>
+                                                    <div class="text-xs sm:text-sm text-gray-500">${new Date(survey.createdAt).toLocaleDateString()}</div>
+                                                </div>
+                                                <button class="bg-green-500 hover:bg-green-600 text-white px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium exportSurveyBtn w-full sm:w-auto" data-survey-id="${survey.id}" data-survey-title="${survey.title}">
+                                                    Export
+                                                </button>
+                                            </div>
+                                        `;
+                                        surveysList.appendChild(surveyItem);
+                                    });
+                                    
+                                    // Add event listeners to export buttons
+                                    document.querySelectorAll('.exportSurveyBtn').forEach(btn => {
+                                        btn.addEventListener('click', async function(e) {
+                                            const surveyId = this.getAttribute('data-survey-id');
+                                            const surveyTitle = this.getAttribute('data-survey-title');
+                                            
+                                            try {
+                                                const exportResponse = await fetch(`/api/survey/${surveyId}/export`);
+                                                const exportResult = await exportResponse.json();
+                                                
+                                                if (exportResult.success) {
+                                                    const json = exportResult.survey.json;
+                                                    currentSurveyJSON = json;
+                                                    
+                                                    // Close modal
+                                                    modal.classList.add('hidden');
+                                                    modal.classList.remove('flex');
+                                                    
+                                                    // Show export section
+                                                    showExportSection();
+                                                    const titleEl = document.getElementById('exportedSurveyTitle');
+                                                    const previewEl = document.getElementById('jsonPreview');
+                                                    if (titleEl) {
+                                                        titleEl.textContent = `Exported: ${surveyTitle}`;
+                                                    }
+                                                    if (previewEl) {
+                                                        previewEl.textContent = JSON.stringify(json, null, 2);
+                                                    }
+                                                    showNotification('Survey exported successfully!');
+                                                } else {
+                                                    showNotification('Error exporting survey', 'error');
+                                                }
+                                            } catch (error) {
+                                                console.error('Error exporting survey:', error);
+                                                showNotification('Error exporting survey: ' + error.message, 'error');
+                                            }
+                                        });
+                                    });
+                                } else {
+                                    surveysList.innerHTML = '<div class="text-center text-gray-500 py-4">No saved surveys yet</div>';
+                                }
+                            } catch (error) {
+                                console.error('Error loading surveys:', error);
+                                const surveysList = document.getElementById('surveysList');
+                                surveysList.innerHTML = `
+                                    <div class="text-center text-red-500 py-4">
+                                        <p class="font-semibold mb-2">Error loading surveys</p>
+                                        <p class="text-sm">${error.message}</p>
+                                        <p class="text-xs text-gray-500 mt-2">Check console for details</p>
+                                    </div>
+                                `;
+                            }
+                        });
+                        
+                        // Close export modal
+                        document.getElementById('closeExportModal').addEventListener('click', function() {
+                            document.getElementById('exportModal').classList.add('hidden');
+                            document.getElementById('exportModal').classList.remove('flex');
+                        });
+                        
+                        document.getElementById('closeExportModalBtn').addEventListener('click', function() {
+                            document.getElementById('exportModal').classList.add('hidden');
+                            document.getElementById('exportModal').classList.remove('flex');
+                        });
+                        
+                        // Export current form in builder
+                        document.getElementById('exportCurrentForm').addEventListener('click', function() {
+                        const json = creator.JSON;
+                            if (!json || (!json.elements && (!json.pages || !json.pages[0] || !json.pages[0].elements))) {
+                                showNotification('Please create a form before exporting!', 'error');
+                                return;
+                            }
+                            
+                        currentSurveyJSON = json;
+                        
+                            // Close modal
+                            document.getElementById('exportModal').classList.add('hidden');
+                            document.getElementById('exportModal').classList.remove('flex');
+                            
+                            // Show export section
+                        showExportSection();
+                            const titleEl = document.getElementById('exportedSurveyTitle');
+                            const previewEl = document.getElementById('jsonPreview');
+                            if (titleEl) {
+                                titleEl.textContent = 'Exported: Current Form';
+                            }
+                            if (previewEl) {
+                                previewEl.textContent = JSON.stringify(json, null, 2);
+                            }
+                            showNotification('Current form exported!');
+                        });
+                        
+                        // Import JSON from file
+                        document.getElementById('importJson').addEventListener('click', function() {
+                            document.getElementById('importJsonFile').click();
+                        });
+                        
+                        document.getElementById('importJsonFile').addEventListener('change', function(e) {
+                            const file = e.target.files[0];
+                            if (!file) return;
+                            
+                            const reader = new FileReader();
+                            reader.onload = function(e) {
+                                try {
+                                    const json = JSON.parse(e.target.result);
+                                    
+                                    // Validate JSON structure
+                                    if (typeof json !== 'object' || json === null) {
+                                        throw new Error('Invalid JSON structure');
+                                    }
+                                    
+                                    console.log('Importing JSON:', json);
+                                    console.log('JSON structure:', {
+                                        hasPages: !!(json.pages),
+                                        pagesCount: json.pages ? json.pages.length : 0,
+                                        pagesElements: json.pages?.[0]?.elements?.length || 0,
+                                        hasElements: !!(json.elements),
+                                        elementsCount: json.elements ? json.elements.length : 0,
+                                        hasQuestions: !!(json.questions),
+                                        questionsCount: json.questions ? json.questions.length : 0,
+                                        keys: Object.keys(json),
+                                        fullJSON: JSON.stringify(json, null, 2)
+                                    });
+                                    
+                                    // Check if creator is initialized
+                                    if (!creator) {
+                                        throw new Error('Form builder not ready. Please wait a moment and try again.');
+                                    }
+                                    
+                                    console.log('Creator properties:', {
+                                        hasText: 'text' in creator,
+                                        hasJSON: 'JSON' in creator,
+                                        hasSurvey: 'survey' in creator,
+                                        creatorType: typeof creator
+                                    });
+                                    
+                                    // Ensure JSON has the proper SurveyJS structure
+                                    // SurveyJS Creator needs at least a pages array
+                                    let normalizedJson = json;
+                                    
+                                    // If JSON doesn't have pages, try to normalize it
+                                    if (!normalizedJson.pages || !Array.isArray(normalizedJson.pages)) {
+                                        console.log('JSON missing pages array, normalizing...');
+                                        
+                                        // Create pages array if it doesn't exist
+                                        if (!normalizedJson.pages) {
+                                            normalizedJson.pages = [];
+                                        }
+                                        
+                                        // If there are elements at root, move them to first page
+                                        if (normalizedJson.elements && Array.isArray(normalizedJson.elements) && normalizedJson.elements.length > 0) {
+                                            if (normalizedJson.pages.length === 0) {
+                                                normalizedJson.pages.push({ name: 'page1', elements: [] });
+                                            }
+                                            normalizedJson.pages[0].elements = normalizedJson.elements;
+                                            delete normalizedJson.elements;
+                                        }
+                                        
+                                        // If there are questions at root, move them to first page
+                                        if (normalizedJson.questions && Array.isArray(normalizedJson.questions) && normalizedJson.questions.length > 0) {
+                                            if (normalizedJson.pages.length === 0) {
+                                                normalizedJson.pages.push({ name: 'page1', elements: [] });
+                                            }
+                                            normalizedJson.pages[0].elements = normalizedJson.questions;
+                                            delete normalizedJson.questions;
+                                        }
+                                        
+                                        // Ensure at least one empty page exists
+                                        if (normalizedJson.pages.length === 0) {
+                                            normalizedJson.pages.push({ name: 'page1', elements: [] });
+                                        }
+                                        
+                                        console.log('Normalized JSON:', normalizedJson);
+                                    }
+                                    
+                                    // Set the imported JSON - this will replace the current form
+                                    // SurveyJS Creator prefers text property for loading JSON
+                                    const jsonString = JSON.stringify(normalizedJson);
+                                    console.log('Setting creator.text with JSON string (first 500 chars):', jsonString.substring(0, 500));
+                                    
+                                    // Try text property first (most reliable method)
+                                    if (creator.text !== undefined) {
+                                        console.log('Using creator.text property');
+                                        creator.text = jsonString;
+                        } else {
+                                        console.warn('creator.text is undefined, trying alternative methods');
+                                    }
+                                    
+                                    // Also set JSON property as fallback
+                                    if (creator.JSON !== undefined) {
+                                        console.log('Also setting creator.JSON property');
+                                        creator.JSON = normalizedJson;
+                                    }
+                                    
+                                    // If neither works, try setting via survey property
+                                    if (creator.survey) {
+                                        console.log('Creator has survey property:', typeof creator.survey);
+                                        
+                                        // Try loadData method
+                                        if (typeof creator.survey.loadData === 'function') {
+                                            console.log('Trying creator.survey.loadData');
+                                            try {
+                                                creator.survey.loadData(normalizedJson);
+                                                console.log('Loaded via survey.loadData');
+                                            } catch (e) {
+                                                console.warn('Could not load via survey.loadData:', e);
+                                            }
+                                        }
+                                        
+                                        // Try fromJSON method
+                                        if (typeof creator.survey.fromJSON === 'function') {
+                                            console.log('Trying creator.survey.fromJSON');
+                                            try {
+                                                creator.survey.fromJSON(normalizedJson);
+                                                console.log('Loaded via survey.fromJSON');
+                                            } catch (e) {
+                                                console.warn('Could not load via survey.fromJSON:', e);
+                                            }
+                                        }
+                                        
+                                        // Direct assignment
+                                        if (creator.survey.data) {
+                                            console.log('Trying to set survey.data');
+                                            try {
+                                                creator.survey.data = normalizedJson;
+                                                console.log('Set survey.data');
+                                            } catch (e) {
+                                                console.warn('Could not set survey.data:', e);
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Force the creator UI to update and show the form
+                                    // Strategy 1: Switch to Designer tab to ensure form is visible
+                                    setTimeout(() => {
+                                        // Try to activate the designer tab
+                                        console.log('Creator object:', creator);
+                                        console.log('Available creator methods:', Object.keys(creator || {}));
+                                        
+                                        // Try multiple ways to switch to designer tab
+                                        if (creator.activeTab !== undefined) {
+                                            console.log('Current active tab:', creator.activeTab);
+                                            // Try to set active tab
+                                            if (typeof creator.activeTab === 'string' || typeof creator.activeTab === 'number') {
+                                                try {
+                                                    creator.activeTab = 'designer';
+                                                    console.log('Set activeTab to designer');
+                                                } catch (e) {
+                                                    console.warn('Could not set activeTab:', e);
+                                                }
+                                            }
+                                        }
+                                        
+                                        // Try makeNewViewActive
+                                        if (creator.makeNewViewActive && typeof creator.makeNewViewActive === 'function') {
+                                            try {
+                                                creator.makeNewViewActive('designer');
+                                                console.log('Called makeNewViewActive("designer")');
+                                            } catch (e) {
+                                                console.warn('Could not call makeNewViewActive:', e);
+                                            }
+                                        }
+                                        
+                                        // Try showDesigner
+                                        if (creator.showDesigner && typeof creator.showDesigner === 'function') {
+                                            try {
+                                                creator.showDesigner();
+                                                console.log('Called showDesigner()');
+                                            } catch (e) {
+                                                console.warn('Could not call showDesigner:', e);
+                                            }
+                                        }
+                                        
+                                        // Strategy 2: Trigger a refresh
+                                        if (creator.onSurveyInstanceCreated) {
+                                            // This event should trigger UI updates
+                                        }
+                                        
+                                        // Strategy 3: Verify JSON was loaded and force update
+                                        const testJson = creator.JSON || (creator.text ? JSON.parse(creator.text) : null);
+                                        const normalizedTestJson = JSON.stringify(normalizedJson);
+                                        const loadedTestJson = JSON.stringify(testJson || {});
+                                        
+                                        console.log('Comparing JSONs - Normalized:', normalizedTestJson.substring(0, 200));
+                                        console.log('Comparing JSONs - Loaded:', loadedTestJson.substring(0, 200));
+                                        
+                                        if (!testJson || loadedTestJson !== normalizedTestJson) {
+                                            console.warn('JSON was not properly loaded. Expected:', normalizedJson);
+                                            console.warn('Current creator.JSON:', testJson);
+                                        } else {
+                                            console.log('✅ JSON successfully loaded into creator');
+                                            
+                                            // Now force the UI to refresh
+                                            requestAnimationFrame(() => {
+                                                requestAnimationFrame(() => {
+                                                    // Verify the JSON was loaded
+                                                    const loadedJson = creator.JSON || testJson;
+                                                    console.log('Loaded JSON after import:', loadedJson);
+                                                    console.log('JSON keys:', Object.keys(loadedJson || {}));
+                                                    
+                                                    // Try to refresh the designer view
+                                                    if (creator.refreshDesigner || creator.refresh) {
+                                                        try {
+                                                            if (typeof creator.refreshDesigner === 'function') {
+                                                                creator.refreshDesigner();
+                                                            } else if (typeof creator.refresh === 'function') {
+                                                                creator.refresh();
+                                                            }
+                                                            console.log('Called refresh method');
+                                                        } catch (refreshError) {
+                                                            console.warn('Refresh method error:', refreshError);
+                                                        }
+                                                    }
+                                                    
+                                                    // Update preview to show the imported form
+                                                    updatePreview();
+                                                    
+                                                    // Scroll to the builder section to show the imported form
+                                                    const creatorElement = document.getElementById('surveyCreator');
+                                                    if (creatorElement) {
+                                                        creatorElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                                    }
+                                                    
+                                                    // Update current survey JSON
+                                                    currentSurveyJSON = loadedJson;
+                                                    
+                                                    // Check if form has elements
+                                                    const hasElements = loadedJson && (
+                                                        (loadedJson.elements && loadedJson.elements.length > 0) ||
+                                                        (loadedJson.pages && loadedJson.pages.length > 0 && loadedJson.pages[0].elements && loadedJson.pages[0].elements.length > 0) ||
+                                                        (loadedJson.questions && loadedJson.questions.length > 0)
+                                                    );
+                                                    
+                                                    if (hasElements) {
+                                                        showNotification(`JSON imported successfully! Form "${json.title || 'Untitled'}" loaded with ${loadedJson.pages?.[0]?.elements?.length || loadedJson.elements?.length || loadedJson.questions?.length || 0} elements.`, 'success');
+                                                    } else {
+                                                        showNotification(`JSON imported successfully! Form "${json.title || 'Untitled'}" loaded. Check the Designer tab to see the form.`, 'success');
+                                                    }
+                                                });
+                                            });
+                                        }
+                                    }, 500);
+                                    
+                                    document.getElementById('importJsonFile').value = '';
+                                } catch (error) {
+                                    console.error('JSON import error:', error);
+                                    showNotification('Error: Invalid JSON file! ' + error.message, 'error');
+                                }
+                            };
+                            reader.readAsText(file);
+                        });
+                        
+                        // Copy JSON to clipboard
+                        document.getElementById('copyJson').addEventListener('click', function() {
+                            const text = document.getElementById('jsonPreview').textContent;
+                            copyToClipboard(text);
+                            showNotification('JSON copied to clipboard!');
+                        });
+                        
+                        // Download JSON as file
+                        document.getElementById('downloadJson').addEventListener('click', function() {
+                            // Get JSON from preview area (most reliable - shows what was actually exported)
+                            const previewEl = document.getElementById('jsonPreview');
+                            let jsonString = '';
+                            let json = null;
+                            
+                            if (previewEl && previewEl.textContent) {
+                                // Use the JSON from the preview (what user sees)
+                                jsonString = previewEl.textContent.trim();
+                                try {
+                                    json = JSON.parse(jsonString);
+                                } catch (e) {
+                                    console.warn('Could not parse preview JSON, trying creator.JSON:', e);
+                                }
+                            }
+                            
+                            // Fallback to currentSurveyJSON or creator.JSON
+                            if (!json && currentSurveyJSON) {
+                                json = currentSurveyJSON;
+                                jsonString = JSON.stringify(json, null, 2);
+                            } else if (!json && creator && creator.JSON) {
+                                json = creator.JSON;
+                                jsonString = JSON.stringify(json, null, 2);
+                            }
+                            
+                            if (!jsonString) {
+                                showNotification('Error: No JSON to download. Please export a survey first.', 'error');
+                                return;
+                            }
+                            
+                            // Get survey title for filename
+                            let surveyTitle = 'survey';
+                            if (json && json.title) {
+                                surveyTitle = json.title;
+                        } else {
+                                // Try to get from exportedSurveyTitle element
+                                const titleEl = document.getElementById('exportedSurveyTitle');
+                                if (titleEl && titleEl.textContent) {
+                                    const titleMatch = titleEl.textContent.match(/Exported:\s*(.+)/);
+                                    if (titleMatch && titleMatch[1]) {
+                                        surveyTitle = titleMatch[1];
+                                    }
+                                }
+                            }
+                            
+                            // Create and download the file
+                            const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            const fileName = surveyTitle.toLowerCase().replace(/[^a-z0-9]/g, '-') + '.json';
+                            a.href = url;
+                            a.download = fileName;
+                            a.style.display = 'none';
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            URL.revokeObjectURL(url);
+                            showNotification(`JSON file "${fileName}" downloaded!`);
+                        });
+                        
+                        // Clear builder
+                        document.getElementById('clearBuilder').addEventListener('click', function() {
+                            if (confirm('Are you sure you want to clear the form? This cannot be undone.')) {
+                                // Clear by setting to empty survey JSON
+                                if (creator && creator.JSON !== undefined) {
+                                    creator.JSON = {};
+                                }
+                                document.getElementById('surveyContainer').innerHTML = '';
+                                currentSurveyJSON = null;
+                                showNotification('Form cleared!');
+                            }
+                        });
+                    
+                    // Auto-update preview when survey changes
+                    creator.onModified.add(() => {
+                        if (document.getElementById('surveyContainer').innerHTML) {
+                            updatePreview();
+                        }
+                    });
+                    
+                    // Initialize with default welcome message
+                    setTimeout(() => {
+                        document.getElementById('surveyContainer').innerHTML = 
+                            '<p class="text-gray-500 text-center p-10">Use the builder on the left to create your form. Click "Show Live Preview" to see it here!</p>';
+                            }, 500);
+                        }
+                        
+                    } catch (renderError) {
+                        console.error('Error in render setup:', renderError);
+                        document.getElementById('surveyCreator').innerHTML = 
+                            '<div style="padding: 20px; color: red;">Error rendering form builder: ' + renderError.message + '</div>';
+                    }
+                    }, 500);
+                            
+                } catch (error) {
+                    console.error('Error initializing Survey Creator:', error);
+                    document.getElementById('surveyCreator').innerHTML = 
+                        '<div style="padding: 20px; color: red;">Error loading form builder: ' + error.message + '. Please check console for details.</div>';
+                }
+            }
+            
+        // Initialize when DOM is ready
+        function startApp() {
+            // Ensure DOM is fully loaded
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', () => {
+                    setTimeout(initApp, 100);
+                });
+                } else {
+                setTimeout(initApp, 100);
+                }
+            }
+            
+        startApp();
+    </script>
+</body>
+</html>
+

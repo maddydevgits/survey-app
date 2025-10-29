@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <!-- SurveyJS CSS (matching builder version) -->
+    <link href="https://unpkg.com/survey-core@1.11.12/defaultV2.min.css" type="text/css" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen py-4 sm:py-6 md:py-10">
+    <div class="max-w-4xl mx-auto px-3 sm:px-4">
+        <div class="bg-white rounded-lg shadow-lg p-4 sm:p-6 md:p-8 mb-4 sm:mb-6">
+            <h1 class="text-2xl sm:text-3xl font-bold text-gray-800 mb-2">{{ title }}</h1>
+            <p class="text-sm sm:text-base text-gray-600">Please fill out the form below</p>
+        </div>
+        
+        <div id="surveyContainer" class="bg-white rounded-lg shadow-lg p-4 sm:p-6 md:p-8"></div>
+    </div>
+    
+    <!-- SurveyJS JavaScript (matching builder version) -->
+    <script src="https://unpkg.com/survey-core@1.11.12/survey.core.min.js"></script>
+    <script src="https://unpkg.com/survey-js-ui@1.11.12/survey-js-ui.min.js"></script>
+    
+    <script>
+        const surveyJSON = {{ surveyJSON | safe }};
+        const surveyId = '{{ surveyId }}';
+        
+        // Wait for Survey to be available and DOM to be ready
+        function initSurvey() {
+            // Check if Survey library is loaded
+            if (typeof Survey === 'undefined') {
+                setTimeout(initSurvey, 100);
+                return;
+            }
+            
+            // Ensure DOM is ready
+            const containerElement = document.getElementById('surveyContainer');
+            if (!containerElement) {
+                setTimeout(initSurvey, 100);
+                return;
+            }
+            
+            // Try different Survey class paths for compatibility
+            let SurveyClass;
+            if (typeof Survey.Survey !== 'undefined') {
+                SurveyClass = Survey.Survey;
+            } else if (typeof Survey.Model !== 'undefined') {
+                SurveyClass = Survey.Model;
+            } else {
+                console.error('Survey class not found. Available:', Object.keys(Survey || {}));
+                containerElement.innerHTML = 
+                    '<div class="text-red-500 p-4">Error: Survey library not loaded properly. Please refresh the page.</div>';
+                return;
+            }
+            
+            // Validate survey JSON
+            if (!surveyJSON || typeof surveyJSON !== 'object') {
+                console.error('Invalid survey JSON:', surveyJSON);
+                containerElement.innerHTML = 
+                    '<div class="text-red-500 p-4">Error: Invalid survey data.</div>';
+                return;
+            }
+            
+            console.log('Loading survey with JSON:', surveyJSON);
+            console.log('Container element:', containerElement);
+            
+            try {
+                const survey = new SurveyClass(surveyJSON);
+                
+                survey.onComplete.add(async (sender) => {
+                    try {
+                        const response = await fetch(`/api/survey/${surveyId}/respond`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(sender.data)
+                        });
+                        
+                        const result = await response.json();
+                        
+                        if (result.success) {
+                            document.body.innerHTML = `
+                                <div class="bg-gray-50 min-h-screen flex items-center justify-center p-4">
+                                    <div class="bg-white rounded-lg shadow-xl p-6 sm:p-8 md:p-12 max-w-md w-full text-center">
+                                        <div class="text-4xl sm:text-5xl md:text-6xl mb-4">✅</div>
+                                        <h1 class="text-2xl sm:text-3xl font-bold text-gray-800 mb-3 sm:mb-4">Thank You!</h1>
+                                        <p class="text-sm sm:text-base text-gray-600 mb-4 sm:mb-6">Your response has been submitted successfully.</p>
+                                        <a href="/surveys" class="inline-block bg-purple-600 text-white px-5 sm:px-6 py-2 sm:py-3 rounded-lg text-sm sm:text-base font-semibold hover:bg-purple-700 transition w-full sm:w-auto">
+                                            Back to Surveys
+                                        </a>
+                                    </div>
+                                </div>
+                            `;
+                        } else {
+                            alert('Error submitting response. Please try again.');
+                        }
+                    } catch (error) {
+                        console.error('Error submitting response:', error);
+                        alert('Error submitting response. Please try again.');
+                    }
+                });
+                
+                // Clear container first and wait a bit for DOM to update
+                containerElement.innerHTML = '';
+                
+                // Wait for DOM to be fully ready before rendering
+                setTimeout(() => {
+                    // Re-get the element to ensure it's still available
+                    const renderContainer = document.getElementById('surveyContainer');
+                    if (!renderContainer) {
+                        console.error('Container element disappeared');
+                        containerElement.innerHTML = 
+                            '<div class="text-red-500 p-4">Error: Container element not found.</div>';
+                        return;
+                    }
+                    
+                    try {
+                        // Verify render method exists
+                        if (typeof survey.render !== 'function') {
+                            console.error('survey.render is not a function', survey);
+                            renderContainer.innerHTML = 
+                                '<div class="text-red-500 p-4">Error: Survey render method not available.</div>';
+                            return;
+                        }
+                        
+                        // Try rendering - some versions may need the element object
+                        // First try with ID string (as builder does)
+                        try {
+                            survey.render('surveyContainer');
+                            console.log('Survey rendered successfully with ID');
+                        } catch (idError) {
+                            console.warn('Render with ID failed, trying with element object:', idError);
+                            // Fallback: try with DOM element directly
+                            survey.render(renderContainer);
+                            console.log('Survey rendered successfully with element object');
+                        }
+                        
+                    } catch (renderError) {
+                        console.error('Render error details:', renderError);
+                        console.error('Error stack:', renderError.stack);
+                        console.error('Container element type:', typeof renderContainer);
+                        console.error('Container element:', renderContainer);
+                        
+                        renderContainer.innerHTML = 
+                            '<div class="text-red-500 p-4">Error rendering survey: ' + renderError.message + 
+                            '<br><small>Check console for details</small></div>';
+                    }
+                }, 100);
+                
+            } catch (error) {
+                console.error('Error creating survey:', error);
+                containerElement.innerHTML = 
+                    '<div class="text-red-500 p-4">Error loading survey: ' + error.message + '</div>';
+            }
+        }
+        
+        // Start initialization when page loads
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initSurvey);
+        } else {
+            initSurvey();
+        }
+    </script>
+</body>
+</html>
+

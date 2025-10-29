@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SurveyJS Form Builder</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- SurveyJS CSS -->
+    <link href="https://unpkg.com/survey-core@1.9.130/defaultV2.min.css" type="text/css" rel="stylesheet">
+    
+    <!-- Survey Creator CSS -->
+    <link href="https://unpkg.com/survey-creator-core@1.9.130/survey-creator-core.min.css" type="text/css" rel="stylesheet">
+    
+    <style>
+        .code-block {
+            display: none;
+        }
+        
+        .code-block.active {
+            display: block;
+        }
+        
+        #jsonPreview {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        #htmlPreview {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .notification {
+            opacity: 0;
+            transform: translateX(100%);
+            transition: all 0.3s ease;
+        }
+        
+        .notification.show {
+            opacity: 1;
+            transform: translateX(0);
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-purple-600 to-purple-800 min-h-screen p-5">
+    <div class="max-w-7xl mx-auto bg-white rounded-xl shadow-2xl overflow-hidden">
+        <div class="bg-gradient-to-r from-purple-600 to-purple-700 text-white p-8 text-center">
+            <h1 class="text-4xl font-bold mb-2">🏗️ SurveyJS Form Builder</h1>
+            <p class="text-lg opacity-90">Build beautiful surveys and forms with ease</p>
+        </div>
+        
+        <div class="bg-gray-50 px-8 py-5 border-b border-gray-200 flex flex-wrap gap-2">
+            <button class="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2.5 rounded-lg font-medium transition-transform hover:-translate-y-0.5 hover:shadow-lg flex items-center gap-2" id="showPreview">
+                📱 Show Live Preview
+            </button>
+            <button class="bg-green-500 hover:bg-green-600 text-white px-5 py-2.5 rounded-lg font-medium transition-transform hover:-translate-y-0.5 hover:shadow-lg flex items-center gap-2" id="exportJson">
+                📥 Export as JSON
+            </button>
+            <button class="bg-gray-600 hover:bg-gray-700 text-white px-5 py-2.5 rounded-lg font-medium transition-transform hover:-translate-y-0.5 hover:shadow-lg flex items-center gap-2" id="clearBuilder">
+                🗑️ Clear Form
+            </button>
+        </div>
+        
+        <div class="grid grid-cols-2 min-h-[600px]">
+            <div id="surveyCreator" class="border-r border-gray-200 p-5"></div>
+            <div class="p-5 overflow-y-auto max-h-[800px]">
+                <h3 class="text-xl font-semibold mb-5 text-gray-800">Live Preview</h3>
+                <div id="surveyContainer" class="bg-white"></div>
+            </div>
+        </div>
+        
+        <div class="bg-gray-50 px-8 py-5 border-t border-gray-200 hidden" id="exportSection">
+            <h3 class="text-lg font-semibold mb-4 text-gray-800">Exported JSON</h3>
+            <div class="flex flex-wrap gap-2">
+                <button class="bg-green-500 hover:bg-green-600 text-white px-5 py-2.5 rounded-lg font-medium transition-transform hover:-translate-y-0.5 hover:shadow-lg" id="copyJson">📋 Copy JSON</button>
+            </div>
+            
+            <div class="bg-gray-900 text-green-400 p-4 rounded-lg mt-3 overflow-x-auto font-mono text-sm max-h-96 overflow-y-auto" id="jsonPreview"></div>
+        </div>
+    </div>
+    
+    <div class="fixed top-5 right-5 bg-green-500 text-white px-6 py-4 rounded-lg shadow-lg z-50" id="notification">Copied to clipboard!</div>
+    
+    <!-- Knockout.js (Required for Survey Creator) -->
+    <script src="https://unpkg.com/knockout@3.5.1/build/output/knockout-latest.js"></script>
+    
+    <!-- SurveyJS JavaScript - Using versions from package.json -->
+    <script src="https://unpkg.com/survey-core@1.9.130/survey.ko.min.js"></script>
+    <script src="https://unpkg.com/survey-creator-core@1.9.130/survey-creator-core.min.js"></script>
+    <script src="https://unpkg.com/survey-creator@1.9.130/survey-creator.min.js"></script>
+    
+    <script>
+        let creator, currentSurveyJSON = null, surveyInstance = null;
+        
+        // Initialize Survey Creator
+        document.addEventListener('DOMContentLoaded', function() {
+            // Wait for all scripts to load
+            function initCreator() {
+                try {
+                    // Debug: Log what's available
+                    console.log('Debug check:');
+                    console.log('- ko:', typeof ko !== 'undefined' ? 'loaded' : 'missing');
+                    console.log('- Survey:', typeof Survey !== 'undefined' ? 'loaded' : 'missing');
+                    console.log('- window.SurveyCreator:', typeof window.SurveyCreator !== 'undefined' ? 'loaded' : 'missing');
+                    console.log('- window.Survey:', typeof window.Survey !== 'undefined' ? 'loaded' : 'missing');
+                    console.log('- typeof SurveyCreator:', typeof SurveyCreator);
+                    
+                    // Check for required dependencies
+                    if (typeof ko === 'undefined') {
+                        throw new Error('Knockout.js is not loaded. Please wait for scripts to load.');
+                    }
+                    
+                    if (typeof Survey === 'undefined') {
+                        throw new Error('Survey Core is not loaded. Please wait for scripts to load.');
+                    }
+                    
+                    if (typeof SurveyCreator === 'undefined') {
+                        throw new Error('SurveyCreator library is not loaded. Please wait for scripts to load.');
+                    }
+                    
+                    const creatorOptions = {
+                        showLogicTab: true,
+                        showTranslationTab: true,
+                        isAutoSave: true,
+                        showDesignerTab: true,
+                        showEmbededSurveyTab: false
+                    };
+                    
+                    creator = new SurveyCreator.SurveyCreator(creatorOptions);
+                    creator.render('surveyCreator');
+                
+                // Show live preview
+                document.getElementById('showPreview').addEventListener('click', function() {
+                    updatePreview();
+                });
+                
+                // Update preview when creator changes
+                creator.onSurveyInstanceCreated.add((sender, options) => {
+                    if (options.survey) {
+                        surveyInstance = options.survey;
+                    }
+                });
+                
+                // Export as JSON
+                document.getElementById('exportJson').addEventListener('click', function() {
+                    const json = creator.JSON;
+                    currentSurveyJSON = json;
+                    
+                    showExportSection();
+                    showNotification('JSON exported!');
+                    
+                    // Show JSON code
+                    document.getElementById('jsonPreview').textContent = JSON.stringify(json, null, 2);
+                });
+                
+                // Copy JSON to clipboard
+                document.getElementById('copyJson').addEventListener('click', function() {
+                    const text = document.getElementById('jsonPreview').textContent;
+                    copyToClipboard(text);
+                    showNotification('JSON copied to clipboard!');
+                });
+                
+                // Clear builder
+                document.getElementById('clearBuilder').addEventListener('click', function() {
+                    if (confirm('Are you sure you want to clear the form? This cannot be undone.')) {
+                        creator.clear();
+                        document.getElementById('surveyContainer').innerHTML = '';
+                        currentSurveyJSON = null;
+                        showNotification('Form cleared!');
+                    }
+                });
+                
+                // Helper functions
+                function updatePreview() {
+                    const json = creator.JSON;
+                    if (json && json.elements && json.elements.length > 0) {
+                        const survey = new Survey.Survey(json);
+                        survey.render('surveyContainer');
+                        showNotification('Preview updated!');
+                    } else {
+                        document.getElementById('surveyContainer').innerHTML = 
+                            '<p class="text-gray-500 text-center p-10">No form elements yet. Start building your form!</p>';
+                    }
+                }
+                
+                function showExportSection() {
+                    document.getElementById('exportSection').classList.remove('hidden');
+                }
+                
+                function copyToClipboard(text) {
+                    navigator.clipboard.writeText(text).catch(err => {
+                        console.error('Failed to copy: ', err);
+                        // Fallback for older browsers
+                        const textArea = document.createElement('textarea');
+                        textArea.value = text;
+                        textArea.style.position = 'fixed';
+                        textArea.style.opacity = '0';
+                        document.body.appendChild(textArea);
+                        textArea.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(textArea);
+                    });
+                }
+                
+                function showNotification(message, type = 'success') {
+                    const notification = document.getElementById('notification');
+                    notification.textContent = message;
+                    
+                    if (type === 'error') {
+                        notification.className = 'fixed top-5 right-5 bg-red-500 text-white px-6 py-4 rounded-lg shadow-lg z-50';
+                    } else {
+                        notification.className = 'fixed top-5 right-5 bg-green-500 text-white px-6 py-4 rounded-lg shadow-lg z-50';
+                    }
+                    
+                    notification.classList.add('show');
+                    
+                    setTimeout(() => {
+                        notification.classList.remove('show');
+                    }, 3000);
+                }
+                
+                // Auto-update preview when survey changes
+                creator.onModified.add(() => {
+                    if (document.getElementById('surveyContainer').innerHTML) {
+                        updatePreview();
+                    }
+                });
+                
+                    // Initialize with default welcome message
+                    setTimeout(() => {
+                        document.getElementById('surveyContainer').innerHTML = 
+                            '<p class="text-gray-500 text-center p-10">Use the builder on the left to create your form. Click "Show Live Preview" to see it here!</p>';
+                    }, 500);
+                            
+                } catch (error) {
+                    console.error('Error initializing Survey Creator:', error);
+                    document.getElementById('surveyCreator').innerHTML = 
+                        '<div style="padding: 20px; color: red;">Error loading form builder: ' + error.message + '. Please check console for details.</div>';
+                    throw error;
+                }
+            }
+            
+            // Try to initialize, retry if needed
+            let retries = 0;
+            const maxRetries = 30;
+            
+            function tryInit() {
+                if (typeof ko !== 'undefined' && typeof Survey !== 'undefined' && typeof SurveyCreator !== 'undefined') {
+                    // Extra check to ensure Survey internals are available
+                    if (typeof Survey.StylesManager === 'undefined' || typeof Survey.Serializer === 'undefined') {
+                        if (retries < maxRetries) {
+                            retries++;
+                            setTimeout(tryInit, 200);
+                            return;
+                        }
+                    }
+                    initCreator();
+                } else if (retries < maxRetries) {
+                    retries++;
+                    setTimeout(tryInit, 200);
+                } else {
+                    document.getElementById('surveyCreator').innerHTML = 
+                        '<div style="padding: 20px; color: red;">Failed to load SurveyJS Creator. Please refresh the page.<br>Check console for errors. ' +
+                        '<br>ko: ' + (typeof ko !== 'undefined' ? 'loaded' : 'missing') +
+                        '<br>Survey: ' + (typeof Survey !== 'undefined' ? 'loaded' : 'missing') +
+                        '<br>SurveyCreator: ' + (typeof SurveyCreator !== 'undefined' ? 'loaded' : 'missing') +
+                        '</div>';
+                }
+            }
+            
+            tryInit();
+        });
+    </script>
+</body>
+</html>
+
