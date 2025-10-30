@@ -15,47 +15,122 @@
       <h1 class="text-3xl font-bold mb-2">Dynamic Survey Form</h1>
       <p class="text-lg opacity-90">Rendered with SurveyJS from JSON</p>
     </div>
-    <div class="p-8">
+    <div class="p-8 space-y-4">
+      <div class="flex items-center justify-between gap-3">
+        <div class="text-sm text-gray-500" id="contextInfo"></div>
+        <div class="flex gap-2">
+          <button id="saveDraftBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm">Save Draft</button>
+          <form method="post" action="/user/logout">
+            <button class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm">Logout</button>
+          </form>
+        </div>
+      </div>
       <div id="form-container"></div>
+      <div id="message" class="text-sm"></div>
     </div>
   </div>
   <!-- SurveyJS modern bundles -->
   <script src="https://unpkg.com/survey-core@1.11.12/survey.core.min.js"></script>
   <script src="https://unpkg.com/survey-js-ui@1.11.12/survey-js-ui.min.js"></script>
+  <!-- Injected by server -->
+  <script>
+    window.__USERNAME__ = "{{ username | default('') }}";
+  </script>
   <script>
     // Embedded SurveyJS JSON describing the form structure
     const formJson = {
-      "logoPosition": "right",
-      "pages": [
-        {
-          "name": "page1",
-          "elements": [
+        "logoPosition": "right",
+        "pages": [
             {
-              "type": "text",
-              "name": "question1",
-              "title": "Question 1"
-            },
-            {
-              "type": "text",
-              "name": "question2",
-              "title": "Question 2"
+            "name": "page1",
+            "elements": [
+                { "type": "text", "name": "question1" },
+                { "type": "text", "name": "question2" },
+                { "type": "expression", "name": "question3", "expression": "{question1} + {question2}" }
+            ]
             }
-          ]
-        }
-      ]
+        ]
     };
 
+    function getQueryParam(name) {
+      const params = new URLSearchParams(window.location.search);
+      return params.get(name);
+    }
+    async function getCurrentUser() {
+      const res = await fetch('/api/me');
+      if (!res.ok) throw new Error('Not logged in');
+      return res.json();
+    }
+
+    async function saveDraft(surveyId, userId, data) {
+      const res = await fetch('/api/draft/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ surveyId, userId, data })
+      });
+      if (!res.ok) throw new Error('Save failed');
+      return res.json();
+    }
+    async function loadDraft(surveyId, userId) {
+      const res = await fetch(`/api/draft/${encodeURIComponent(surveyId)}/${encodeURIComponent(userId)}`);
+      if (!res.ok) throw new Error('Load failed');
+      return res.json();
+    }
+    function setMessage(text, type = 'info') {
+      const el = document.getElementById('message');
+      el.className = 'text-sm ' + (type === 'error' ? 'text-red-600' : type === 'success' ? 'text-green-600' : 'text-gray-600');
+      el.textContent = text;
+    }
+
     // Wait for scripts to load
-    document.addEventListener('DOMContentLoaded', function() {
+    document.addEventListener('DOMContentLoaded', async function() {
       if (typeof Survey === 'undefined' || typeof Survey.Model !== 'function') {
         document.getElementById('form-container').innerHTML = '<p class="text-red-500">SurveyJS scripts failed to load.</p>';
         return;
       }
+
+      const surveyId = getQueryParam('surveyId') || 'demo';
+      // Prefer server-injected username; fallback to API
+      let username = (window.__USERNAME__ || '').trim();
+      if (!username) {
+        try {
+          const me = await getCurrentUser();
+          username = me.user && me.user.username ? me.user.username : '';
+        } catch (e) {
+          // If not logged in, middleware would have redirected
+        }
+      }
+      const userId = username; // use username as userId key
+      const ctx = document.getElementById('contextInfo');
+      if (ctx) ctx.textContent = `surveyId=${surveyId} · user=${userId || 'unknown'}`;
+
       const survey = new Survey.Model(formJson);
       survey.onComplete.add(function(sender) {
         alert('Survey results: ' + JSON.stringify(sender.data));
       });
       survey.render(document.getElementById('form-container'));
+
+      // Wire buttons
+      document.getElementById('saveDraftBtn').addEventListener('click', async () => {
+        try {
+          const data = { ...survey.data, pageNo: survey.currentPageNo };
+          await saveDraft(surveyId, userId, data);
+          setMessage('Draft saved.', 'success');
+        } catch (e) {
+          setMessage('Failed to save draft. Is DB connected?', 'error');
+        }
+      });
+
+      // Auto-restore on load
+      try {
+        const res = await loadDraft(surveyId, userId);
+        const data = res.data || {};
+        survey.data = data;
+        if (data.pageNo != null) survey.currentPageNo = data.pageNo;
+        setMessage('Draft auto-restored.', 'success');
+      } catch (e) {
+        // silent if none
+      }
     });
   </script>
 </body>

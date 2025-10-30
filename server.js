@@ -1,6 +1,8 @@
 const express = require('express');
 const nunjucks = require('nunjucks');
 const { v4: uuidv4 } = require('uuid');
+const { MongoClient } = require('mongodb');
+const session = require('express-session');
 
 const app = express();
 const PORT = process.env.PORT || 8091;
@@ -8,6 +10,46 @@ const PORT = process.env.PORT || 8091;
 // In-memory storage (can be replaced with database)
 const surveys = new Map(); // Store survey definitions
 const responses = new Map(); // Store survey responses
+
+// MongoDB (optional) - for draft save/load
+let mongoClient = null;
+let draftsCollection = null;
+let usersCollection = null;
+let surveysCollection = null;
+let responsesCollection = null;
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://parvathanenimadhu:123madhu@cluster0.yaaw6.mongodb.net/surveyapp?retryWrites=true&w=majority';
+async function initMongo() {
+    if (!MONGODB_URI) {
+        console.warn('MONGODB_URI not set. Draft endpoints will be unavailable.');
+        return;
+    }
+    try {
+        mongoClient = new MongoClient(MONGODB_URI);
+        await mongoClient.connect();
+        const dbName = process.env.MONGODB_DB || 'surveyapp';
+        const db = mongoClient.db(dbName);
+        draftsCollection = db.collection('drafts');
+        usersCollection = db.collection('users');
+        surveysCollection = db.collection('surveys');
+        responsesCollection = db.collection('responses');
+        // Ensure index for upsert lookups
+        await draftsCollection.createIndex({ surveyId: 1, userId: 1 }, { unique: true });
+        await usersCollection.createIndex({ username: 1 }, { unique: true });
+        await surveysCollection.createIndex({ id: 1 }, { unique: true });
+        await responsesCollection.createIndex({ surveyId: 1 });
+        console.log('✅ Connected to MongoDB and initialized collections');
+        // Seed admin user if not exists (username: admin, password: admin123)
+        const admin = await usersCollection.findOne({ username: 'admin' });
+        if (!admin) {
+            await usersCollection.insertOne({ username: 'admin', password: 'admin123', role: 'admin', createdAt: new Date().toISOString() });
+            console.log('👑 Seeded default admin user');
+        }
+    } catch (err) {
+        console.error('❌ MongoDB init failed:', err.message);
+        draftsCollection = null;
+    }
+}
+initMongo();
 
 // Configure Nunjucks
 nunjucks.configure('views', {
@@ -21,7 +63,96 @@ app.set('view engine', 'html');
 
 // Parse JSON bodies (before routes)
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
+// Session middleware
+app.use(session({
+    secret: process.env.SESSION_SECRET || 'dev_secret_change_me',
+    resave: false,
+    saveUninitialized: false,
+}));
+
+// Auth helpers
+function requireAdmin(req, res, next) {
+    if (req.session && req.session.user && req.session.user.role === 'admin') return next();
+    return res.redirect('/admin/login');
+}
+function requireUser(req, res, next) {
+    if (req.session && req.session.user) return next();
+    const redirect = encodeURIComponent(req.originalUrl || '/dynamic-form');
+    return res.redirect(`/user/login?redirect=${redirect}`);
+}
+
+// Admin auth routes
+app.get('/admin/login', (req, res) => {
+    res.render('admin-login', { title: 'Admin Login' });
+});
+app.post('/admin/login', async (req, res) => {
+    const { username, password } = req.body || {};
+    try {
+        if (usersCollection) {
+            const user = await usersCollection.findOne({ username });
+            if (user && user.password === password && user.role === 'admin') {
+                req.session.user = { id: user._id, username: user.username, role: 'admin' };
+                return res.redirect('/');
+            }
+        } else if (username === 'admin' && password === 'admin123') {
+            req.session.user = { username: 'admin', role: 'admin' };
+            return res.redirect('/');
+        }
+    } catch (e) {}
+    res.status(401).render('admin-login', { title: 'Admin Login', error: 'Invalid credentials' });
+});
+app.post('/admin/logout', (req, res) => {
+    req.session.destroy(() => res.redirect('/admin/login'));
+});
+
+// Admin dashboard
+app.get('/admin', requireAdmin, (req, res) => {
+    res.render('admin', { title: 'Admin Dashboard', user: req.session.user });
+});
+app.post('/admin/users', requireAdmin, async (req, res) => {
+    const { username, password } = req.body || {};
+    if (!username || !password) {
+        return res.status(400).render('admin', { title: 'Admin Dashboard', user: req.session.user, error: 'Username and password required' });
+    }
+    try {
+        if (!usersCollection) throw new Error('DB unavailable');
+        await usersCollection.insertOne({ username, password, role: 'user', createdAt: new Date().toISOString() });
+        res.render('admin', { title: 'Admin Dashboard', user: req.session.user, success: `User ${username} created` });
+    } catch (e) {
+        res.status(400).render('admin', { title: 'Admin Dashboard', user: req.session.user, error: 'Failed to create user (might already exist)' });
+    }
+});
+
+// User auth routes
+app.get('/user/login', (req, res) => {
+    res.render('user-login', { title: 'User Login', redirect: req.query.redirect || '' });
+});
+app.post('/user/login', async (req, res) => {
+    const { username, password, redirect } = req.body || {};
+    try {
+        if (!usersCollection) throw new Error('DB unavailable');
+        const user = await usersCollection.findOne({ username, role: { $in: ['user', 'admin'] } });
+        if (!user || user.password !== password) throw new Error('Invalid');
+        req.session.user = { id: user._id, username: user.username, role: user.role };
+        return res.redirect(redirect || '/dynamic-form');
+    } catch (e) {
+        res.status(401).render('user-login', { title: 'User Login', error: 'Invalid credentials', redirect });
+    }
+});
+app.post('/user/logout', (req, res) => {
+    req.session.destroy(() => res.redirect('/user/login'));
+});
+
+// Current user info (for client-side usage)
+app.get('/api/me', (req, res) => {
+    if (req.session && req.session.user) {
+        const { username, role } = req.session.user;
+        return res.json({ loggedIn: true, user: { username, role } });
+    }
+    return res.status(401).json({ loggedIn: false });
+});
 // Routes - API routes first to avoid conflicts
 // Get all surveys (for export selection) - MUST come before /survey/:id
 app.get('/api/surveys/list', (req, res) => {
@@ -65,11 +196,49 @@ app.get('/api/survey/:id/export', (req, res) => {
     });
 });
 
+// Draft APIs (Mongo-backed)
+app.post('/api/draft/save', async (req, res) => {
+    if (!draftsCollection) {
+        return res.status(503).json({ success: false, error: 'Draft storage unavailable (no DB connection)' });
+    }
+    const { surveyId, userId, data } = req.body || {};
+    if (!surveyId || !userId || typeof data !== 'object') {
+        return res.status(400).json({ success: false, error: 'surveyId, userId and data are required' });
+    }
+    const now = new Date().toISOString();
+    try {
+        const result = await draftsCollection.updateOne(
+            { surveyId, userId },
+            { $set: { surveyId, userId, data, updatedAt: now } },
+            { upsert: true }
+        );
+        res.json({ success: true, upserted: !!result.upsertedId, matchedCount: result.matchedCount });
+    } catch (err) {
+        console.error('❌ Error saving draft:', err);
+        res.status(500).json({ success: false, error: 'Failed to save draft' });
+    }
+});
+
+app.get('/api/draft/:surveyId/:userId', async (req, res) => {
+    if (!draftsCollection) {
+        return res.status(503).json({ success: false, error: 'Draft storage unavailable (no DB connection)' });
+    }
+    const { surveyId, userId } = req.params;
+    try {
+        const draft = await draftsCollection.findOne({ surveyId, userId });
+        if (!draft) return res.status(404).json({ success: false, error: 'Draft not found' });
+        res.json({ success: true, data: draft.data, updatedAt: draft.updatedAt });
+    } catch (err) {
+        console.error('❌ Error fetching draft:', err);
+        res.status(500).json({ success: false, error: 'Failed to fetch draft' });
+    }
+});
+
 // Serve static files (CSS, JS, images, etc.) - after API routes
 app.use(express.static('public'));
 
 // Routes - page routes
-app.get('/', (req, res) => {
+app.get('/', requireAdmin, (req, res) => {
     res.render('index', {
         title: 'SurveyJS Form Builder',
         pageTitle: 'SurveyJS Form Builder'
@@ -77,7 +246,7 @@ app.get('/', (req, res) => {
 });
 
 // List all surveys
-app.get('/surveys', (req, res) => {
+app.get('/surveys', requireAdmin, (req, res) => {
     const surveyList = Array.from(surveys.values()).map(s => ({
         id: s.id,
         title: s.title || 'Untitled Survey',
@@ -104,7 +273,7 @@ app.get('/survey/:id', (req, res) => {
 });
 
 // Save survey definition
-app.post('/api/survey/save', (req, res) => {
+app.post('/api/survey/save', requireAdmin, async (req, res) => {
     const { json, title } = req.body;
     if (!json) {
         return res.status(400).json({ error: 'Survey JSON is required' });
@@ -117,6 +286,17 @@ app.post('/api/survey/save', (req, res) => {
         json: json,
         createdAt: new Date().toISOString()
     });
+    try {
+        if (surveysCollection) {
+            await surveysCollection.updateOne(
+                { id: surveyId },
+                { $set: { id: surveyId, title: title || 'Untitled Survey', json, createdAt: new Date().toISOString() } },
+                { upsert: true }
+            );
+        }
+    } catch (e) {
+        console.warn('Mongo save survey failed:', e.message);
+    }
     
     res.json({
         success: true,
@@ -126,7 +306,7 @@ app.post('/api/survey/save', (req, res) => {
 });
 
 // Submit survey response
-app.post('/api/survey/:id/respond', (req, res) => {
+app.post('/api/survey/:id/respond', async (req, res) => {
     const surveyId = req.params.id;
     const survey = surveys.get(surveyId);
     
@@ -141,6 +321,13 @@ app.post('/api/survey/:id/respond', (req, res) => {
         data: req.body,
         submittedAt: new Date().toISOString()
     });
+    try {
+        if (responsesCollection) {
+            await responsesCollection.insertOne({ id: responseId, surveyId, data: req.body, submittedAt: new Date().toISOString() });
+        }
+    } catch (e) {
+        console.warn('Mongo save response failed:', e.message);
+    }
     
     res.json({
         success: true,
@@ -361,8 +548,9 @@ app.delete('/api/survey/:id', (req, res) => {
 });
 
 // Serve the dynamic form demo page
-app.get('/dynamic-form', (req, res) => {
-    res.sendFile(__dirname + '/views/dynamic-form.html');
+app.get('/dynamic-form', requireUser, (req, res) => {
+    const username = (req.session && req.session.user && req.session.user.username) || '';
+    res.render('dynamic-form', { username });
 });
 
 // Start server
@@ -373,5 +561,8 @@ app.listen(PORT, () => {
     console.log(`   - GET /api/surveys/list`);
     console.log(`   - GET /api/survey/:id/export`);
     console.log(`   - POST /api/survey/save`);
+    console.log(`   - POST /api/draft/save`);
+    console.log(`   - GET /api/draft/:surveyId/:userId`);
+    console.log(`   - Admin/User auth routes enabled`);
 });
 

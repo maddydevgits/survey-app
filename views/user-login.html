@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>{{ title }}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-6">
+  <div class="w-full max-w-md bg-white rounded-xl shadow p-6 space-y-4">
+    <h1 class="text-2xl font-bold">User Login</h1>
+    {% if error %}
+    <div class="text-sm text-red-600">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="/user/login" class="space-y-3">
+      <input type="hidden" name="redirect" value="{{ redirect }}" />
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Username</label>
+        <input name="username" class="mt-1 w-full border rounded px-3 py-2" />
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Password</label>
+        <input type="password" name="password" class="mt-1 w-full border rounded px-3 py-2" />
+      </div>
+      <button class="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">Login</button>
+    </form>
+  </div>
+</body>
+</html>
