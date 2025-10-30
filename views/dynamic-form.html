@@ -18,9 +18,9 @@
     <div class="p-8 space-y-4">
       <div class="flex items-center justify-between gap-3">
         <div class="text-sm text-gray-500" id="contextInfo"></div>
-        <div class="flex gap-2">
+        <div class="flex gap-2 items-center" id="actionsBar">
           <button id="saveDraftBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm">Save Draft</button>
-          <form method="post" action="/user/logout">
+          <form method="post" action="/user/logout" id="logoutForm">
             <button class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm">Logout</button>
           </form>
         </div>
@@ -34,24 +34,11 @@
   <script src="https://unpkg.com/survey-js-ui@1.11.12/survey-js-ui.min.js"></script>
   <!-- Injected by server -->
   <script>
-    window.__USERNAME__ = "{{ username | default('') }}";
+    window.__USER_ID__ = "{{ userId | default('') }}";
+    window.__SURVEY_ID__ = "{{ surveyId | default('') }}";
+    window.__PUBLIC__ = "{{ isPublic | default(false) | dump }}";
   </script>
   <script>
-    // Embedded SurveyJS JSON describing the form structure
-    const formJson = {
-        "logoPosition": "right",
-        "pages": [
-            {
-            "name": "page1",
-            "elements": [
-                { "type": "text", "name": "question1" },
-                { "type": "text", "name": "question2" },
-                { "type": "expression", "name": "question3", "expression": "{question1} + {question2}" }
-            ]
-            }
-        ]
-    };
-
     function getQueryParam(name) {
       const params = new URLSearchParams(window.location.search);
       return params.get(name);
@@ -60,6 +47,13 @@
       const res = await fetch('/api/me');
       if (!res.ok) throw new Error('Not logged in');
       return res.json();
+    }
+    async function fetchSurveyJson(surveyId) {
+      const res = await fetch(`/api/survey/${encodeURIComponent(surveyId)}/export`);
+      if (!res.ok) throw new Error('Survey load failed');
+      const out = await res.json();
+      if (!out.success || !out.survey || !out.survey.json) throw new Error('Invalid survey payload');
+      return out.survey.json;
     }
 
     async function saveDraft(surveyId, userId, data) {
@@ -89,24 +83,55 @@
         return;
       }
 
-      const surveyId = getQueryParam('surveyId') || 'demo';
-      // Prefer server-injected username; fallback to API
-      let username = (window.__USERNAME__ || '').trim();
-      if (!username) {
+      // Prefer injected values for stateless public links
+      let surveyId = (window.__SURVEY_ID__ || '').trim() || getQueryParam('surveyId') || 'demo';
+      let userId = (window.__USER_ID__ || '').trim();
+      const isPublic = (window.__PUBLIC__ === true || window.__PUBLIC__ === 'true');
+
+      // If no injected userId and not public, fallback to session API
+      if (!userId && !isPublic) {
         try {
           const me = await getCurrentUser();
-          username = me.user && me.user.username ? me.user.username : '';
+          userId = me.user && (me.user.id || me.user._id) ? (me.user.id || me.user._id) : '';
         } catch (e) {
-          // If not logged in, middleware would have redirected
+          // ignore
         }
       }
-      const userId = username; // use username as userId key
+
       const ctx = document.getElementById('contextInfo');
-      if (ctx) ctx.textContent = `surveyId=${surveyId} · user=${userId || 'unknown'}`;
+      if (ctx) ctx.textContent = `surveyId=${surveyId} · userId=${userId || 'unknown'}`;
+
+      // Hide logout when public
+      if (isPublic) {
+        const logoutForm = document.getElementById('logoutForm');
+        if (logoutForm && logoutForm.parentNode) logoutForm.parentNode.removeChild(logoutForm);
+      }
+
+      // Load survey JSON from backend
+      let formJson = null;
+      try {
+        formJson = await fetchSurveyJson(surveyId);
+      } catch (e) {
+        setMessage('Failed to load survey definition. ' + e.message, 'error');
+        return;
+      }
 
       const survey = new Survey.Model(formJson);
-      survey.onComplete.add(function(sender) {
-        alert('Survey results: ' + JSON.stringify(sender.data));
+      survey.onComplete.add(async function(sender) {
+        try {
+          // Include user metadata in submission
+          const payload = { ...sender.data, _userId: userId };
+          const res = await fetch(`/api/survey/${encodeURIComponent(surveyId)}/respond`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const out = await res.json().catch(() => ({}));
+          if (!res.ok || !out.success) throw new Error(out.error || 'Submit failed');
+          setMessage('Response submitted successfully.', 'success');
+        } catch (e) {
+          setMessage('Failed to submit response: ' + e.message, 'error');
+        }
       });
       survey.render(document.getElementById('form-container'));
 
@@ -114,7 +139,7 @@
       document.getElementById('saveDraftBtn').addEventListener('click', async () => {
         try {
           const data = { ...survey.data, pageNo: survey.currentPageNo };
-          await saveDraft(surveyId, userId, data);
+        await saveDraft(surveyId, userId, data);
           setMessage('Draft saved.', 'success');
         } catch (e) {
           setMessage('Failed to save draft. Is DB connected?', 'error');

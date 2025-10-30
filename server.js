@@ -1,7 +1,7 @@
 const express = require('express');
 const nunjucks = require('nunjucks');
 const { v4: uuidv4 } = require('uuid');
-const { MongoClient } = require('mongodb');
+const { MongoClient, ObjectId } = require('mongodb');
 const session = require('express-session');
 
 const app = express();
@@ -108,8 +108,23 @@ app.post('/admin/logout', (req, res) => {
 });
 
 // Admin dashboard
-app.get('/admin', requireAdmin, (req, res) => {
-    res.render('admin', { title: 'Admin Dashboard', user: req.session.user });
+app.get('/admin', requireAdmin, async (req, res) => {
+    let surveysList = [];
+    let usersList = [];
+    try {
+        if (surveysCollection) {
+            const cursor = surveysCollection.find({}, { projection: { _id: 1, id: 1, title: 1, createdAt: 1 } }).sort({ _id: -1 }).limit(100);
+            surveysList = await cursor.toArray();
+        }
+        if (usersCollection) {
+            const cursorU = usersCollection.find({ role: { $in: ['user', 'admin'] } }, { projection: { _id: 1, username: 1, role: 1, createdAt: 1 } }).sort({ _id: -1 }).limit(100);
+            usersList = await cursorU.toArray();
+        }
+        console.log('✅ Admin dashboard loaded', { surveysList: surveysList.length, usersList: usersList.length });
+    } catch (e) {
+        // ignore listing errors, show empty lists
+    }
+    res.render('admin', { title: 'Admin Dashboard', user: req.session.user, surveysList, usersList });
 });
 app.post('/admin/users', requireAdmin, async (req, res) => {
     const { username, password } = req.body || {};
@@ -148,52 +163,57 @@ app.post('/user/logout', (req, res) => {
 // Current user info (for client-side usage)
 app.get('/api/me', (req, res) => {
     if (req.session && req.session.user) {
-        const { username, role } = req.session.user;
-        return res.json({ loggedIn: true, user: { username, role } });
+        const { id, username, role } = req.session.user;
+        return res.json({ loggedIn: true, user: { id, username, role } });
     }
     return res.status(401).json({ loggedIn: false });
 });
 // Routes - API routes first to avoid conflicts
 // Get all surveys (for export selection) - MUST come before /survey/:id
-app.get('/api/surveys/list', (req, res) => {
+app.get('/api/surveys/list', async (req, res) => {
     console.log('📋 /api/surveys/list endpoint called - Route registered!');
     try {
-        const surveysList = Array.from(surveys.values()).map(s => ({
-            id: s.id,
-            title: s.title || 'Untitled Survey',
-            createdAt: s.createdAt
-        }));
-        const sorted = surveysList.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        let dbSurveys = [];
+        if (surveysCollection) {
+            const cursor = surveysCollection.find({}, { projection: { _id: 1, id: 1, title: 1, createdAt: 1 } });
+            dbSurveys = await cursor.toArray();
+        }
+        const normalized = dbSurveys.map(d => ({ id: String(d._id || d.id), title: d.title || 'Untitled Survey', createdAt: d.createdAt }));
+        const sorted = normalized.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
         console.log(`✅ Returning ${sorted.length} surveys`);
-        res.json({
-            success: true,
-            surveys: sorted
-        });
+        res.json({ success: true, surveys: sorted });
     } catch (error) {
         console.error('❌ Error in /api/surveys/list:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to fetch surveys',
-            message: error.message
-        });
+        res.status(500).json({ success: false, error: 'Failed to fetch surveys', message: error.message });
     }
 });
 
 // Get a specific survey by ID (for export)
-app.get('/api/survey/:id/export', (req, res) => {
-    const survey = surveys.get(req.params.id);
-    if (!survey) {
-        return res.status(404).json({ error: 'Survey not found' });
-    }
-    res.json({
-        success: true,
-        survey: {
-            id: survey.id,
-            title: survey.title || 'Untitled Survey',
-            json: survey.json,
-            createdAt: survey.createdAt
+app.get('/api/survey/:id/export', async (req, res) => {
+    const id = req.params.id;
+    let survey = null;
+    try {
+        if (surveysCollection) {
+            // Try by custom id then by _id
+            let doc = await surveysCollection.findOne({ id });
+            if (!doc) {
+                try {
+                    const oid = new ObjectId(id);
+                    doc = await surveysCollection.findOne({ _id: oid });
+                } catch (_) {}
+            }
+            if (doc) {
+                survey = { id: String(doc._id || doc.id), title: doc.title, json: doc.json, createdAt: doc.createdAt };
+            }
         }
-    });
+        if (!survey) {
+            return res.status(404).json({ success: false, error: 'Survey not found' });
+        }
+        res.json({ success: true, survey: { id: survey.id, title: survey.title || 'Untitled Survey', json: survey.json, createdAt: survey.createdAt } });
+    } catch (e) {
+        console.error('❌ Error exporting survey:', e);
+        res.status(500).json({ success: false, error: 'Failed to load survey' });
+    }
 });
 
 // Draft APIs (Mongo-backed)
@@ -245,95 +265,97 @@ app.get('/', requireAdmin, (req, res) => {
     });
 });
 
-// List all surveys
-app.get('/surveys', requireAdmin, (req, res) => {
-    const surveyList = Array.from(surveys.values()).map(s => ({
-        id: s.id,
-        title: s.title || 'Untitled Survey',
-        createdAt: s.createdAt,
-        responseCount: Array.from(responses.values()).filter(r => r.surveyId === s.id).length
-    }));
-    res.render('surveys', {
-        title: 'My Surveys',
-        surveys: surveyList
-    });
+// List all surveys (admin)
+app.get('/surveys', requireAdmin, async (req, res) => {
+    try {
+        let dbSurveys = [];
+        if (surveysCollection) {
+            const cursor = surveysCollection.find({}, { projection: { _id: 1, id: 1, title: 1, createdAt: 1 } });
+            dbSurveys = await cursor.toArray();
+        }
+        const base = dbSurveys.map(d => ({ id: String(d._id || d.id), title: d.title || 'Untitled Survey', createdAt: d.createdAt }));
+        const addCounts = await Promise.all(base.map(async s => {
+            let cnt = 0;
+            if (responsesCollection) {
+                cnt = await responsesCollection.countDocuments({ surveyId: s.id });
+            }
+            return { ...s, responseCount: cnt };
+        }));
+        const sorted = addCounts.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+        res.render('surveys', { title: 'My Surveys', surveys: sorted });
+    } catch (e) {
+        res.render('surveys', { title: 'My Surveys', surveys: [] });
+    }
 });
 
 // View/run a survey (for users to fill out)
-app.get('/survey/:id', (req, res) => {
-    const survey = surveys.get(req.params.id);
-    if (!survey) {
-        return res.status(404).send('Survey not found');
+app.get('/survey/:id', async (req, res) => {
+    const id = req.params.id;
+    let survey = null;
+    try {
+        if (surveysCollection) {
+            let doc = await surveysCollection.findOne({ id });
+            if (!doc) {
+                try {
+                    const oid = new ObjectId(id);
+                    doc = await surveysCollection.findOne({ _id: oid });
+                } catch (_) {}
+            }
+            if (doc) {
+                survey = { id: String(doc._id || doc.id), title: doc.title, json: doc.json };
+            }
+        }
+        if (!survey) return res.status(404).send('Survey not found');
+        res.render('survey-runner', { title: survey.title || 'Survey', surveyJSON: JSON.stringify(survey.json), surveyId: survey.id });
+    } catch (e) {
+        res.status(500).send('Error loading survey');
     }
-    res.render('survey-runner', {
-        title: survey.title || 'Survey',
-        surveyJSON: JSON.stringify(survey.json),
-        surveyId: survey.id
-    });
 });
 
-// Save survey definition
+// Save survey definition (admin only)
 app.post('/api/survey/save', requireAdmin, async (req, res) => {
     const { json, title } = req.body;
     if (!json) {
         return res.status(400).json({ error: 'Survey JSON is required' });
     }
-    
     const surveyId = req.body.id || uuidv4();
-    surveys.set(surveyId, {
-        id: surveyId,
-        title: title || 'Untitled Survey',
-        json: json,
-        createdAt: new Date().toISOString()
-    });
     try {
-        if (surveysCollection) {
-            await surveysCollection.updateOne(
-                { id: surveyId },
-                { $set: { id: surveyId, title: title || 'Untitled Survey', json, createdAt: new Date().toISOString() } },
-                { upsert: true }
-            );
-        }
+        if (!surveysCollection) throw new Error('DB unavailable');
+        await surveysCollection.updateOne(
+            { id: surveyId },
+            { $set: { id: surveyId, title: title || 'Untitled Survey', json, createdAt: new Date().toISOString() } },
+            { upsert: true }
+        );
+        res.json({ success: true, surveyId: surveyId, message: 'Survey saved successfully' });
     } catch (e) {
-        console.warn('Mongo save survey failed:', e.message);
+        console.error('❌ Error saving survey:', e);
+        res.status(500).json({ success: false, error: 'Failed to save survey' });
     }
-    
-    res.json({
-        success: true,
-        surveyId: surveyId,
-        message: 'Survey saved successfully'
-    });
 });
 
 // Submit survey response
 app.post('/api/survey/:id/respond', async (req, res) => {
-    const surveyId = req.params.id;
-    const survey = surveys.get(surveyId);
-    
-    if (!survey) {
-        return res.status(404).json({ error: 'Survey not found' });
-    }
-    
-    const responseId = uuidv4();
-    responses.set(responseId, {
-        id: responseId,
-        surveyId: surveyId,
-        data: req.body,
-        submittedAt: new Date().toISOString()
-    });
+    const surveyId = String(req.params.id);
     try {
+        if (!surveysCollection) return res.status(404).json({ error: 'Survey not found' });
+        // Ensure survey exists in DB
+        let exists = await surveysCollection.findOne({ id: surveyId });
+        if (!exists) {
+            try {
+                const oid = new ObjectId(surveyId);
+                exists = await surveysCollection.findOne({ _id: oid });
+            } catch (_) {}
+        }
+        if (!exists) return res.status(404).json({ error: 'Survey not found' });
+        const responseId = uuidv4();
         if (responsesCollection) {
             await responsesCollection.insertOne({ id: responseId, surveyId, data: req.body, submittedAt: new Date().toISOString() });
         }
+        res.json({ success: true, message: 'Response submitted successfully', responseId });
     } catch (e) {
-        console.warn('Mongo save response failed:', e.message);
+        console.error('❌ Error saving response:', e);
+        res.status(500).json({ success: false, error: 'Failed to submit response' });
     }
-    
-    res.json({
-        success: true,
-        message: 'Response submitted successfully',
-        responseId: responseId
-    });
 });
 
 // Helper function to extract questions from survey JSON
@@ -421,84 +443,55 @@ function extractQuestions(surveyJson) {
 }
 
 // Get survey responses
-app.get('/survey/:id/responses', (req, res) => {
-    const surveyId = req.params.id;
-    const survey = surveys.get(surveyId);
-    
-    if (!survey) {
-        return res.status(404).send('Survey not found');
-    }
-    
-    // Extract questions from survey JSON for mapping
-    const questions = extractQuestions(survey.json);
-    const questionMap = new Map();
-    questions.forEach(q => {
-        questionMap.set(q.name, q);
-    });
-    
-    // Debug: Log extracted questions
-    console.log('\n=== RESPONSE PAGE DEBUG ===');
-    console.log('Survey ID:', surveyId);
-    console.log('Survey title:', survey.title);
-    console.log('Extracted questions count:', questions.length);
-    console.log('Extracted questions:', JSON.stringify(questions, null, 2));
-    console.log('Question map keys:', Array.from(questionMap.keys()));
-    console.log('First 1000 chars of survey JSON:', JSON.stringify(survey.json, null, 2).substring(0, 1000));
-    console.log('===========================\n');
-    
-    const surveyResponses = Array.from(responses.values())
-        .filter(r => r.surveyId === surveyId)
-        .sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt))
-        .map(r => {
-            // Debug: Log response data
-            console.log('Response data keys:', Object.keys(r.data));
-            console.log('Response data:', r.data);
-            
-            // Map response data to readable format
+app.get('/survey/:id/responses', async (req, res) => {
+    const surveyIdParam = String(req.params.id);
+    let surveyDoc = null;
+    try {
+        if (surveysCollection) {
+            let doc = await surveysCollection.findOne({ id: surveyIdParam });
+            if (!doc) {
+                try {
+                    const oid = new ObjectId(surveyIdParam);
+                    doc = await surveysCollection.findOne({ _id: oid });
+                } catch (_) {}
+            }
+            if (doc) surveyDoc = doc;
+        }
+        if (!surveyDoc) return res.status(404).send('Survey not found');
+
+        // Extract questions from survey JSON for mapping
+        const questions = extractQuestions(surveyDoc.json);
+        const questionMap = new Map();
+        questions.forEach(q => questionMap.set(q.name, q));
+
+        // Load responses from Mongo
+        let dbResponses = [];
+        if (responsesCollection) {
+            const cursor = responsesCollection.find({ surveyId: String(surveyDoc._id || surveyDoc.id) }).sort({ submittedAt: -1 });
+            dbResponses = await cursor.toArray();
+        }
+
+        const surveyResponses = dbResponses.map(r => {
+            const data = r.data || {};
             const formattedData = {};
             const formattedAnswers = [];
-            
-            Object.keys(r.data).forEach(fieldName => {
+            Object.keys(data).forEach(fieldName => {
                 const question = questionMap.get(fieldName);
-                console.log(`Mapping field "${fieldName}":`, {
-                    foundQuestion: !!question,
-                    questionName: question ? question.name : 'N/A',
-                    questionTitle: question ? question.title : 'N/A'
-                });
-                
                 const questionTitle = question ? question.title : fieldName;
-                let answerValue = r.data[fieldName];
-                
-                // Format answer based on question type
+                let answerValue = data[fieldName];
                 if (question && question.choices && Array.isArray(question.choices)) {
-                    // For choice-based questions, show the choice text
                     const choice = question.choices.find(c => {
-                        if (typeof c === 'string') {
-                            return c === answerValue;
-                        } else if (c.value !== undefined) {
-                            return c.value === answerValue || c.value === String(answerValue);
-                        } else {
-                            return false;
-                        }
+                        if (typeof c === 'string') return c === answerValue;
+                        if (c && typeof c === 'object' && c.value !== undefined) return c.value === answerValue || c.value === String(answerValue);
+                        return false;
                     });
-                    
-                    if (choice) {
-                        if (typeof choice === 'string') {
-                            answerValue = choice;
-                        } else {
-                            answerValue = choice.text || choice.value || answerValue;
-                        }
-                    }
+                    if (choice) answerValue = typeof choice === 'string' ? choice : (choice.text || choice.value || answerValue);
                 } else if (Array.isArray(answerValue)) {
-                    // Handle multiple choice answers
                     if (question && question.choices) {
                         answerValue = answerValue.map(val => {
                             const choice = question.choices.find(c => {
-                                if (typeof c === 'string') {
-                                    return c === val;
-                                } else if (c.value !== undefined) {
-                                    return c.value === val || c.value === String(val);
-                                }
+                                if (typeof c === 'string') return c === val;
+                                if (c && typeof c === 'object' && c.value !== undefined) return c.value === val || c.value === String(val);
                                 return false;
                             });
                             return choice ? (typeof choice === 'string' ? choice : (choice.text || choice.value)) : val;
@@ -507,50 +500,75 @@ app.get('/survey/:id/responses', (req, res) => {
                         answerValue = answerValue.join(', ');
                     }
                 }
-                
                 formattedData[questionTitle] = answerValue;
-                formattedAnswers.push({
-                    question: questionTitle,
-                    answer: answerValue !== null && answerValue !== undefined ? String(answerValue) : '(No answer)',
-                    fieldName: fieldName
-                });
+                formattedAnswers.push({ question: questionTitle, answer: answerValue !== null && answerValue !== undefined ? String(answerValue) : '(No answer)', fieldName });
             });
-            
-            return {
-                ...r,
-                dataJSON: JSON.stringify(r.data, null, 2),
-                formattedData: formattedData,
-                formattedAnswers: formattedAnswers
-            };
+            return { id: r.id, dataJSON: JSON.stringify(data, null, 2), formattedData, formattedAnswers, submittedAt: r.submittedAt };
         });
-    
-    res.render('responses', {
-        title: `Responses: ${survey.title || 'Survey'}`,
-        survey: survey,
-        responses: surveyResponses
-    });
+
+        res.render('responses', { title: `Responses: ${surveyDoc.title || 'Survey'}`, survey: { id: String(surveyDoc._id || surveyDoc.id), title: surveyDoc.title }, responses: surveyResponses });
+    } catch (e) {
+        console.error('❌ Error loading responses:', e);
+        res.status(500).send('Error loading responses');
+    }
 });
 
 // Delete survey
-app.delete('/api/survey/:id', (req, res) => {
+app.delete('/api/survey/:id', async (req, res) => {
     const surveyId = req.params.id;
-    if (surveys.delete(surveyId)) {
-        // Also delete associated responses
-        Array.from(responses.entries()).forEach(([id, response]) => {
-            if (response.surveyId === surveyId) {
-                responses.delete(id);
-            }
-        });
-        res.json({ success: true, message: 'Survey deleted' });
-    } else {
-        res.status(404).json({ error: 'Survey not found' });
+    let found = false;
+    if (surveys.has(surveyId)) {
+        found = true;
+        surveys.delete(surveyId);
     }
+    // Delete associated in-memory responses
+    Array.from(responses.entries()).forEach(([rid, response]) => {
+        if (response.surveyId === surveyId) {
+            responses.delete(rid);
+        }
+    });
+    // Delete from Mongo if available
+    try {
+        if (surveysCollection) {
+            // Try delete by custom id
+            const r1 = await surveysCollection.deleteOne({ id: surveyId });
+            // If not found, try by _id
+            if (r1.deletedCount === 0) {
+                try {
+                    const oid = new (require('mongodb').ObjectId)(surveyId);
+                    const r2 = await surveysCollection.deleteOne({ _id: oid });
+                    if (r2.deletedCount > 0) found = true;
+                } catch (_) {}
+            } else {
+                found = true;
+            }
+        }
+        if (responsesCollection) {
+            await responsesCollection.deleteMany({ surveyId });
+        }
+        if (draftsCollection) {
+            await draftsCollection.deleteMany({ surveyId });
+        }
+    } catch (e) {
+        console.warn('Mongo deletion warning:', e.message);
+    }
+    if (!found) {
+        return res.status(404).json({ success: false, error: 'Survey not found' });
+    }
+    res.json({ success: true, message: 'Survey deleted' });
 });
 
 // Serve the dynamic form demo page
 app.get('/dynamic-form', requireUser, (req, res) => {
     const username = (req.session && req.session.user && req.session.user.username) || '';
     res.render('dynamic-form', { username });
+});
+
+// Serve public, stateless form links: /f/:surveyId/:userId
+app.get('/f/:surveyId/:userId', (req, res) => {
+    const userId = req.params.userId;
+    const surveyId = req.params.surveyId;
+    res.render('dynamic-form', { userId, surveyId, isPublic: true });
 });
 
 // Start server
