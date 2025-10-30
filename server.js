@@ -360,6 +360,11 @@ app.delete('/api/survey/:id', (req, res) => {
     }
 });
 
+// Serve the dynamic form demo page
+app.get('/dynamic-form', (req, res) => {
+    res.sendFile(__dirname + '/views/dynamic-form.html');
+});
+
 // Start server
 app.listen(PORT, () => {
     console.log(`🚀 SurveyJS Form Builder running on http://localhost:${PORT}`);

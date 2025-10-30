@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dynamic Form</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- SurveyJS CSS (match index.html) -->
+  <link href="https://unpkg.com/survey-core@1.11.12/defaultV2.min.css" type="text/css" rel="stylesheet">
+</head>
+<body class="bg-gradient-to-br from-purple-600 to-purple-800 min-h-screen p-8">
+  <div class="max-w-xl mx-auto bg-white rounded-xl shadow-2xl overflow-hidden mt-12">
+    <div class="bg-gradient-to-r from-purple-600 to-purple-700 text-white p-8 text-center">
+      <h1 class="text-3xl font-bold mb-2">Dynamic Survey Form</h1>
+      <p class="text-lg opacity-90">Rendered with SurveyJS from JSON</p>
+    </div>
+    <div class="p-8">
+      <div id="form-container"></div>
+    </div>
+  </div>
+  <!-- SurveyJS modern bundles -->
+  <script src="https://unpkg.com/survey-core@1.11.12/survey.core.min.js"></script>
+  <script src="https://unpkg.com/survey-js-ui@1.11.12/survey-js-ui.min.js"></script>
+  <script>
+    // Embedded SurveyJS JSON describing the form structure
+    const formJson = {
+      "logoPosition": "right",
+      "pages": [
+        {
+          "name": "page1",
+          "elements": [
+            {
+              "type": "text",
+              "name": "question1",
+              "title": "Question 1"
+            },
+            {
+              "type": "text",
+              "name": "question2",
+              "title": "Question 2"
+            }
+          ]
+        }
+      ]
+    };
+
+    // Wait for scripts to load
+    document.addEventListener('DOMContentLoaded', function() {
+      if (typeof Survey === 'undefined' || typeof Survey.Model !== 'function') {
+        document.getElementById('form-container').innerHTML = '<p class="text-red-500">SurveyJS scripts failed to load.</p>';
+        return;
+      }
+      const survey = new Survey.Model(formJson);
+      survey.onComplete.add(function(sender) {
+        alert('Survey results: ' + JSON.stringify(sender.data));
+      });
+      survey.render(document.getElementById('form-container'));
+    });
+  </script>
+</body>
+</html>
