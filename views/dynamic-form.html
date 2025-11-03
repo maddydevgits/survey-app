@@ -20,6 +20,7 @@
         <div class="text-sm text-gray-500" id="contextInfo"></div>
         <div class="flex gap-2 items-center" id="actionsBar">
           <button id="saveDraftBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm">Save Draft</button>
+          <button id="shareBtn" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm hidden">Share</button>
           <form method="post" action="/user/logout" id="logoutForm">
             <button class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm">Logout</button>
           </form>
@@ -27,6 +28,30 @@
       </div>
       <div id="form-container"></div>
       <div id="message" class="text-sm"></div>
+    </div>
+  </div>
+
+  <!-- Share Modal -->
+  <div id="shareModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden items-center justify-center p-4">
+    <div class="bg-white rounded-xl shadow-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-2xl font-bold text-gray-800">Share Survey</h3>
+        <button id="closeShareModal" class="text-gray-500 hover:text-gray-700 text-3xl leading-none">&times;</button>
+      </div>
+      <div class="mb-4">
+        <p class="text-sm text-gray-600 mb-3">Select users to share this survey with:</p>
+        <div id="usersList" class="border rounded-lg p-3 max-h-64 overflow-y-auto">
+          <div class="text-center text-gray-500 py-4">Loading users...</div>
+        </div>
+      </div>
+      <div id="sharedWithList" class="mb-4">
+        <p class="text-sm font-semibold text-gray-700 mb-2">Currently shared with:</p>
+        <div id="sharedUsers" class="text-sm text-gray-600">Loading...</div>
+      </div>
+      <div class="flex gap-2">
+        <button id="shareSubmitBtn" class="bg-green-500 hover:bg-green-600 text-white px-5 py-2 rounded-lg font-medium">Share Selected</button>
+        <button id="closeShareModalBtn" class="bg-gray-500 hover:bg-gray-600 text-white px-5 py-2 rounded-lg font-medium">Cancel</button>
+      </div>
     </div>
   </div>
   <!-- SurveyJS modern bundles -->
@@ -37,6 +62,7 @@
     window.__USER_ID__ = "{{ userId | default('') }}";
     window.__SURVEY_ID__ = "{{ surveyId | default('') }}";
     window.__PUBLIC__ = "{{ isPublic | default(false) | dump }}";
+    window.__IS_OWNER__ = {{ isOwner | default(false) | dump }};
   </script>
   <script>
     function getQueryParam(name) {
@@ -67,7 +93,16 @@
     }
     async function loadDraft(surveyId, userId) {
       const res = await fetch(`/api/draft/${encodeURIComponent(surveyId)}/${encodeURIComponent(userId)}`);
-      if (!res.ok) throw new Error('Load failed');
+      if (!res.ok) {
+        if (res.status === 403) {
+          // Access denied - user doesn't have permission (not shared with them)
+          throw new Error('ACCESS_DENIED');
+        } else if (res.status === 404) {
+          // No draft found - this is OK, just means no draft exists yet
+          throw new Error('NOT_FOUND');
+        }
+        throw new Error('Load failed');
+      }
       return res.json();
     }
     function setMessage(text, type = 'info') {
@@ -87,6 +122,7 @@
       let surveyId = (window.__SURVEY_ID__ || '').trim() || getQueryParam('surveyId') || 'demo';
       let userId = (window.__USER_ID__ || '').trim();
       const isPublic = (window.__PUBLIC__ === true || window.__PUBLIC__ === 'true');
+      const isOwner = (window.__IS_OWNER__ === true || window.__IS_OWNER__ === 'true');
 
       // If no injected userId and not public, fallback to session API
       if (!userId && !isPublic) {
@@ -105,6 +141,12 @@
       if (isPublic) {
         const logoutForm = document.getElementById('logoutForm');
         if (logoutForm && logoutForm.parentNode) logoutForm.parentNode.removeChild(logoutForm);
+      }
+
+      // Show Share button if owner
+      if (isOwner && isPublic) {
+        const shareBtnEl = document.getElementById('shareBtn');
+        if (shareBtnEl) shareBtnEl.classList.remove('hidden');
       }
 
       // Load survey JSON from backend
@@ -146,7 +188,145 @@
         }
       });
 
-      // Auto-restore on load
+      // Share modal functionality
+      const shareModal = document.getElementById('shareModal');
+      const shareBtnEl = document.getElementById('shareBtn');
+      const closeShareModal = document.getElementById('closeShareModal');
+      const closeShareModalBtn = document.getElementById('closeShareModalBtn');
+      const shareSubmitBtn = document.getElementById('shareSubmitBtn');
+      const usersListEl = document.getElementById('usersList');
+      const sharedUsersEl = document.getElementById('sharedUsers');
+
+      let selectedUserIds = [];
+
+      async function loadUsersForSharing() {
+        try {
+          const res = await fetch('/api/users/list');
+          if (!res.ok) throw new Error('Failed to load users');
+          const out = await res.json();
+          if (!out.success) throw new Error(out.error || 'Failed');
+          
+          // Display users with checkboxes
+          if (out.users && out.users.length > 0) {
+            usersListEl.innerHTML = out.users.map(u => `
+              <label class="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
+                <input type="checkbox" class="userCheckbox" value="${u.id}" data-username="${u.username}">
+                <span>${u.username} <span class="text-xs text-gray-500">(${u.role})</span></span>
+              </label>
+            `).join('');
+            
+            // Update selectedUserIds when checkboxes change
+            document.querySelectorAll('.userCheckbox').forEach(cb => {
+              cb.addEventListener('change', function() {
+                if (this.checked) {
+                  if (!selectedUserIds.includes(this.value)) selectedUserIds.push(this.value);
+                } else {
+                  selectedUserIds = selectedUserIds.filter(id => id !== this.value);
+                }
+              });
+            });
+          } else {
+            usersListEl.innerHTML = '<div class="text-center text-gray-500 py-4">No users available</div>';
+          }
+        } catch (e) {
+          usersListEl.innerHTML = `<div class="text-center text-red-500 py-4">Error: ${e.message}</div>`;
+        }
+      }
+
+      async function loadSharedUsers() {
+        try {
+          const res = await fetch(`/api/survey/${encodeURIComponent(surveyId)}/shared`);
+          if (!res.ok) throw new Error('Failed to load shared users');
+          const out = await res.json();
+          
+          // Clear existing content and handlers
+          sharedUsersEl.innerHTML = '';
+          
+          if (out.success && out.sharedWith && out.sharedWith.length > 0) {
+            out.sharedWith.forEach(u => {
+              const userDiv = document.createElement('div');
+              userDiv.className = 'inline-flex items-center gap-2 bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs mr-2 mb-2';
+              userDiv.innerHTML = `
+                <span>${u.username}</span>
+                <button class="removeSharedUser text-red-600 hover:text-red-800 font-bold" data-user-id="${u.id}" data-username="${u.username}" title="Remove access">&times;</button>
+              `;
+              
+              // Attach remove handler directly to the button
+              const removeBtn = userDiv.querySelector('.removeSharedUser');
+              removeBtn.addEventListener('click', async function(e) {
+                e.stopPropagation();
+                const userId = this.getAttribute('data-user-id');
+                const username = this.getAttribute('data-username');
+                if (!confirm(`Remove access for ${username}?`)) return;
+                
+                try {
+                  const removeRes = await fetch(`/api/survey/${encodeURIComponent(surveyId)}/share/${encodeURIComponent(userId)}`, {
+                    method: 'DELETE'
+                  });
+                  const removeOut = await removeRes.json();
+                  if (!removeRes.ok || !removeOut.success) throw new Error(removeOut.error || 'Remove failed');
+                  setMessage(`Access removed for ${username}.`, 'success');
+                  // Reload shared users list after a short delay
+                  setTimeout(async () => {
+                    await loadSharedUsers();
+                  }, 100);
+                } catch (e) {
+                  setMessage('Failed to remove access: ' + e.message, 'error');
+                }
+              });
+              
+              sharedUsersEl.appendChild(userDiv);
+            });
+          } else {
+            sharedUsersEl.innerHTML = '<span class="text-gray-400">Not shared with anyone yet</span>';
+          }
+        } catch (e) {
+          sharedUsersEl.innerHTML = `<span class="text-red-500">Error loading shared users</span>`;
+        }
+      }
+
+      shareBtnEl?.addEventListener('click', async () => {
+        shareModal.classList.remove('hidden');
+        shareModal.classList.add('flex');
+        selectedUserIds = [];
+        await loadUsersForSharing();
+        await loadSharedUsers();
+      });
+
+      closeShareModal?.addEventListener('click', () => {
+        shareModal.classList.add('hidden');
+        shareModal.classList.remove('flex');
+      });
+
+      closeShareModalBtn?.addEventListener('click', () => {
+        shareModal.classList.add('hidden');
+        shareModal.classList.remove('flex');
+      });
+
+      shareSubmitBtn?.addEventListener('click', async () => {
+        if (selectedUserIds.length === 0) {
+          setMessage('Please select at least one user to share with.', 'error');
+          return;
+        }
+        try {
+          const res = await fetch(`/api/survey/${encodeURIComponent(surveyId)}/share`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userIds: selectedUserIds })
+          });
+          const out = await res.json();
+          if (!res.ok || !out.success) throw new Error(out.error || 'Share failed');
+          setMessage(`Survey shared with ${selectedUserIds.length} user(s).`, 'success');
+          shareModal.classList.add('hidden');
+          shareModal.classList.remove('flex');
+          // Refresh shared users list
+          await loadSharedUsers();
+        } catch (e) {
+          setMessage('Failed to share: ' + e.message, 'error');
+        }
+      });
+
+      // Auto-restore on load (only if user has access)
       try {
         const res = await loadDraft(surveyId, userId);
         const data = res.data || {};
@@ -154,7 +334,11 @@
         if (data.pageNo != null) survey.currentPageNo = data.pageNo;
         setMessage('Draft auto-restored.', 'success');
       } catch (e) {
-        // silent if none
+        // Silent if draft doesn't exist (NOT_FOUND) or access denied (ACCESS_DENIED)
+        // Only show error for other failures
+        if (e.message !== 'NOT_FOUND' && e.message !== 'ACCESS_DENIED') {
+          console.warn('Draft load error:', e.message);
+        }
       }
     });
   </script>

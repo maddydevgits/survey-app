@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Shared Surveys</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen p-6">
+  <div class="max-w-4xl mx-auto">
+    <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+      <div class="flex items-center justify-between">
+        <h1 class="text-2xl font-bold">Shared Surveys</h1>
+        <form method="post" action="/user/logout">
+          <button class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded">Logout</button>
+        </form>
+      </div>
+      <p class="text-sm text-gray-600 mt-2">Surveys shared with you by other users</p>
+    </div>
+    
+    <div id="surveysList" class="space-y-4">
+      <div class="bg-white rounded-xl shadow p-6 text-center text-gray-500">Loading shared surveys...</div>
+    </div>
+  </div>
+
+  <script>
+    async function loadSharedSurveys() {
+      try {
+        const res = await fetch('/api/surveys/shared-with-me');
+        if (!res.ok) throw new Error('Failed to load surveys');
+        const out = await res.json();
+        if (!out.success) throw new Error(out.error || 'Failed');
+        
+        const listEl = document.getElementById('surveysList');
+        if (!out.surveys || out.surveys.length === 0) {
+          listEl.innerHTML = '<div class="bg-white rounded-xl shadow p-8 text-center text-gray-500">No surveys shared with you yet.</div>';
+          return;
+        }
+        
+        listEl.innerHTML = out.surveys.map(s => `
+          <div class="bg-white rounded-xl shadow p-6">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="text-lg font-semibold text-gray-800">${s.title || 'Untitled Survey'}</h3>
+                <p class="text-sm text-gray-500 mt-1">
+                  Shared by: ${s.owner ? s.owner.username : 'Unknown'}
+                  ${s.createdAt ? ' • Created: ' + new Date(s.createdAt).toLocaleDateString() : ''}
+                </p>
+              </div>
+              ${s.ownerLink ? `<a href="${s.ownerLink}" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg">Open Survey</a>` : ''}
+            </div>
+          </div>
+        `).join('');
+      } catch (e) {
+        document.getElementById('surveysList').innerHTML = 
+          `<div class="bg-white rounded-xl shadow p-6 text-center text-red-500">Error: ${e.message}</div>`;
+      }
+    }
+    
+    document.addEventListener('DOMContentLoaded', loadSharedSurveys);
+  </script>
+</body>
+</html>
